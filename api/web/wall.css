@@ -258,3 +258,19 @@
   #dvrView .dvr-tools { gap: 6px; }
   #dvrView .cw-seg > button { min-width: 34px; padding: 0 6px; }
 }
+
+/* ------------------------------------------------------------ pie de estado */
+#view-mosaico .cw-wallfoot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 14px; padding: 10px 0 0;
+  border-top: 1px solid #1C2532; font-size: 12px; color: var(--cw-muted);
+}
+#view-mosaico .cw-wf { display: inline-flex; align-items: center; gap: 6px; }
+#view-mosaico .cw-wf[hidden] { display: none; }
+#view-mosaico .cw-wf[data-wf="live"] .cw-dot { background: var(--cw-live); }
+#view-mosaico .cw-wf[data-wf="connecting"] .cw-dot { background: #7FB0FF; }
+#view-mosaico .cw-wf[data-wf="auth"] .cw-dot { background: var(--cw-warn); }
+#view-mosaico .cw-wf[data-wf="offline"] .cw-dot { background: #5B6675; }
+#view-mosaico .cw-wf[data-wf="paused"] .cw-dot { background: var(--cw-muted); }
+#view-mosaico .cw-wallfoot__info { margin-left: auto; }
+#view-mosaico.is-fit .cw-wallfoot, #view-mosaico.is-fit .cw-hint { display: none; }
+@media (max-width: 640px) { #view-mosaico .cw-wallfoot__info { margin-left: 0; width: 100%; } }

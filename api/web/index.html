@@ -115,6 +115,15 @@
   </section>
   <p class="cw-hint" id="wallHint">Arrastra las cámaras para reordenarlas o moverlas entre zonas.</p>
   <section id="wall" class="wall"></section>
+  <footer class="cw-wallfoot" id="wallFoot" role="status" aria-label="Estado del mosaico">
+    <span id="wfTotal"></span>
+    <span class="cw-wf" data-wf="live" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="connecting" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="auth" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="offline" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="paused" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wallfoot__info" id="wfInfo"></span>
+  </footer>
   <p class="empty" id="emptyWall">
     No hay streams publicados. Ve al inventario y pulsa <strong>Publicar</strong> en las cámaras que quieras ver.
   </p>

@@ -693,8 +693,45 @@ function setWallPaused(p) {
   paintAllTiles();                 // la insignia pasa a «Pausado» / vuelve
 }
 
-// Pie de estado del Mosaico (se completa en B14).
-function updateWallFooter() {}
+// ---- pie de estado del Mosaico ----
+// «N cámaras · en vivo · conectando · pide clave · sin señal (· en pausa)» contados
+// desde el estado de cada teja (paintTileStatus), y a la derecha la calidad y la
+// detección actuales. Se recalcula con un pequeño retardo: pintar 16 tejas de
+// golpe no hace 16 recuentos.
+const WF_TEXT = {
+  live: (n) => `${n} en vivo`, connecting: (n) => `${n} conectando`,
+  auth: (n) => `${n} ${n === 1 ? "pide clave" : "piden clave"}`, offline: (n) => `${n} sin señal`,
+  paused: (n) => `${n} en pausa`,
+};
+let wfTimer = null;
+function updateWallFooter() {
+  if (wfTimer) return;
+  wfTimer = setTimeout(() => { wfTimer = null; renderWallFooter(); }, 60);
+}
+
+function renderWallFooter() {
+  const foot = $("#wallFoot");
+  if (!foot) return;
+  const counts = { live: 0, connecting: 0, auth: 0, offline: 0, paused: 0 };
+  let ia = 0;
+  state.tiles.forEach((c) => {
+    if (c.status in counts) counts[c.status]++;
+    if (c.config && c.config.enabled) ia++;
+  });
+  const n = state.tiles.size;
+  $("#wfTotal").textContent = `${n} ${n === 1 ? "cámara" : "cámaras"}`;
+  Object.keys(counts).forEach((k) => {
+    const el = foot.querySelector(`[data-wf="${k}"]`);
+    if (!el) return;
+    el.hidden = counts[k] === 0;
+    if (counts[k]) el.querySelector(".cw-wf__txt").textContent = WF_TEXT[k](counts[k]);
+  });
+  const calidad = liveMosaic ? "vídeo en vivo"
+    : lightMode ? "mínima (modo ligero)"
+    : autoQ ? `automática: ${Q_LEVELS[qLevel].name}` : "fija";
+  const deteccion = state.serverDetection ? "servidor" : ia ? "navegador" : "sin IA activa";
+  $("#wfInfo").textContent = `Calidad ${calidad} · Detección: ${deteccion}`;
+}
 
 function startWallFeeds() {
   if (liveMosaic) startLiveMosaic();
@@ -832,6 +869,7 @@ async function loadWall() {
   try { state.serverDetection = (await api("/api/health")).detector; } catch (_) {}
   await applyServerConfigs();
   if (gen !== wallGen) return;
+  updateWallFooter();
   openDetectionStream();
   startAlarmSweeper();
 
@@ -1669,6 +1707,7 @@ function toggleFullscreen(el) {
 
 function stopWall() {
   wallRunning = false;
+  updateWallFooter();
   if (tileObserver) tileObserver.disconnect();   // las tejas se van a rehacer
   stopSnapRefresh();
   if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
@@ -1694,6 +1733,7 @@ function applyLightBtn() {
   b.title = "Forzar calidad mínima en este equipo (desactiva el ajuste automático)";
   paintMenuToggle(b, lightMode,
     lightMode ? "mínima" : autoQ ? `auto: ${Q_LEVELS[qLevel].name}` : "");
+  updateWallFooter();
 }
 $("#btnLight").addEventListener("click", () => {
   lightMode = !lightMode;
@@ -1727,6 +1767,7 @@ function applyMosaicModeBtn() {
   const b = $("#btnMosaicMode");
   if (!b) return;
   paintMenuToggle(b, liveMosaic, liveMosaic ? "" : "fotogramas");
+  updateWallFooter();
   const al = $("#btnAutoLive");
   if (al) al.hidden = liveMosaic;     // en vivo ya están todas: auto-vivo no aplica
 }
@@ -4157,6 +4198,7 @@ function enterZoneKioskChrome() {
   const tb = $(".topbar"); if (tb) tb.style.display = "none";
   const wb = $(".cw-wallbar"); if (wb) wb.style.display = "none";
   const wh = $("#wallHint"); if (wh) wh.style.display = "none";
+  const wf = $("#wallFoot"); if (wf) wf.style.display = "none";
   $$(".view").forEach((v) => v.classList.remove("active"));
   const m = $("#view-mosaico"); if (m) m.classList.add("active");
 }
