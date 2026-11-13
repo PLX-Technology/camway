@@ -2308,9 +2308,37 @@ const ONGOING_CLASSES = [...FIRE_CLASSES, ...EPP_CLASSES];
 const FIRE_REALARM_MS = 20000;
 const AI_CLEAR_MS = 8000;      // cuánto se mantiene la alarma tras el último acierto
 
+// ---- varios objetivos por cámara ----
+// La config lleva `targets` (lista de "persona", "vehiculo", "epp", "fuego"). Las
+// guardadas con el antiguo `target` (uno solo, o "ambos") se traducen al leerlas.
+const AI_TARGETS = ["persona", "vehiculo", "epp", "fuego"];
+const BROWSER_TARGETS = ["persona", "vehiculo"];   // lo que el modelo del navegador (COCO-SSD) sabe ver
+const TARGET_NAMES = { persona: "Personas", vehiculo: "Vehículos", epp: "Persona sin casco", fuego: "Fuego o humo" };
+
+function targetName(t) { return TARGET_NAMES[t] || t; }
+function targetsFromLegacy(t) {
+  if (t === "ambos") return ["persona", "vehiculo"];
+  return AI_TARGETS.includes(t) ? [t] : ["vehiculo"];
+}
+function cleanTargets(list) {            // sin repetidos ni valores raros, en orden fijo
+  const have = new Set(Array.isArray(list) ? list : []);
+  return AI_TARGETS.filter((t) => have.has(t));
+}
+function cfgTargets(cfg) {               // los objetivos de una config, venga como venga
+  const t = cleanTargets(cfg && cfg.targets);
+  return t.length ? t : targetsFromLegacy(cfg && cfg.target);
+}
+function browserTargets(cfg) { return cfgTargets(cfg).filter((t) => BROWSER_TARGETS.includes(t)); }
+// Valor del antiguo `target` para quien aún no entiende `targets` (p. ej. la app de TV).
+function legacyTarget(targets) {
+  const t = cleanTargets(targets);
+  if (t.length === 2 && t.includes("persona") && t.includes("vehiculo")) return "ambos";
+  return t[0] || "vehiculo";
+}
+
 function defaultAiConfig() {
   return {
-    enabled: false, target: "vehiculo", action: "full", minScore: 0.4, zone: null,
+    enabled: false, targets: ["vehiculo"], action: "full", minScore: 0.4, zone: null,
     sound: true,
     schedule: { enabled: false, days: [], start: "21:00", end: "06:00" },
   };
@@ -2378,7 +2406,12 @@ function refreshZoneTag(ctrl) {
 function loadAiConfig(streamId) {
   try {
     const raw = localStorage.getItem(AI_KEY + streamId);
-    return raw ? { ...defaultAiConfig(), ...JSON.parse(raw) } : defaultAiConfig();
+    if (!raw) return defaultAiConfig();
+    const saved = JSON.parse(raw);
+    const cfg = { ...defaultAiConfig(), ...saved };
+    cfg.targets = cfgTargets(saved);      // de `targets` o, si es una config vieja, de `target`
+    delete cfg.target;
+    return cfg;
   } catch (_) {
     return defaultAiConfig();
   }
@@ -2391,8 +2424,8 @@ async function saveAiConfig(streamId, cfg) {
   await api(`/api/streams/${encodeURIComponent(streamId)}/ai`, {
     method: "PUT",
     body: JSON.stringify({
-      enabled: cfg.enabled, target: cfg.target, min_score: cfg.minScore,
-      action: cfg.action, zone: cfg.zone, schedule: cfg.schedule,
+      enabled: cfg.enabled, targets: cleanTargets(cfg.targets), target: legacyTarget(cfg.targets),
+      min_score: cfg.minScore, action: cfg.action, zone: cfg.zone, schedule: cfg.schedule,
     }),
   });
   try { localStorage.setItem(AI_KEY + streamId, JSON.stringify(cfg)); } catch (_) {}
@@ -2402,7 +2435,7 @@ function serverCfgToLocal(s, streamId) {
   // El sonido es preferencia de ESTE navegador: se conserva de localStorage.
   const local = loadAiConfig(streamId);
   return {
-    enabled: !!s.enabled, target: s.target || "vehiculo",
+    enabled: !!s.enabled, targets: cfgTargets(s),
     action: s.action || "full", minScore: s.min_score ?? 0.4,
     zone: s.zone || null,
     sound: local.sound !== false,
@@ -2422,22 +2455,26 @@ async function applyServerConfigs() {
     refreshAiButton(ctrl);
     refreshZoneTag(ctrl);
     refreshSchedTag(ctrl);
-    if (ctrl.config.enabled && !state.serverDetection) aiEngine.register(ctrl);
+    if (ctrl.config.enabled && !state.serverDetection && browserTargets(ctrl.config).length) aiEngine.register(ctrl);
   });
 }
 
+// Clases del detector que cuentan para esta cámara: la unión de las de cada objetivo.
 function targetClasses(cfg) {
-  if (cfg.target === "persona") return PERSON_CLASSES;
-  if (cfg.target === "ambos") return [...VEHICLE_CLASSES, ...PERSON_CLASSES];
-  if (cfg.target === "fuego") return FIRE_CLASSES;
-  if (cfg.target === "epp") return EPP_CLASSES;
-  return VEHICLE_CLASSES;
+  const out = [];
+  cfgTargets(cfg).forEach((t) => {
+    if (t === "persona") out.push(...PERSON_CLASSES);
+    else if (t === "vehiculo") out.push(...VEHICLE_CLASSES);
+    else if (t === "epp") out.push(...EPP_CLASSES);
+    else if (t === "fuego") out.push(...FIRE_CLASSES);
+  });
+  return [...new Set(out)];
 }
 
 function classLabel(name) {
   return { car: "Auto", truck: "Camión", bus: "Bus", motorcycle: "Moto",
            person: "Persona", head: "Sin casco", helmet: "Con casco",
-           vest: "Chaleco" }[name] || name;
+           vest: "Chaleco", fuego: "Fuego", humo: "Humo" }[name] || name;
 }
 
 function refreshAiButton(ctrl) {
@@ -2474,6 +2511,29 @@ function loadTensorflow() {
       .catch((err) => { tfLoading = null; throw err; });
   }
   return tfLoading;
+}
+
+// ---- estado del motor de detección (¿procesa el servidor o solo el navegador?) ----
+// GET /api/detector/status → {online, last_seen, models:{general, epp, fuego}}. Si el
+// servidor aún no lo ofrece, se usa lo que ya se sabe: `state.serverDetection`.
+const engineStatus = { known: false, online: false, models: null, source: "", ts: 0 };
+
+async function loadEngineStatus(force = false) {
+  if (!force && engineStatus.known && Date.now() - engineStatus.ts < 10000) return engineStatus;
+  try {
+    const r = await api("/api/detector/status", { timeout: 8000 });
+    engineStatus.online = !!r.online;
+    engineStatus.models = r.models && typeof r.models === "object" ? r.models : null;
+    engineStatus.source = "status";
+    state.serverDetection = engineStatus.online;
+  } catch (_) {
+    engineStatus.online = !!state.serverDetection;
+    engineStatus.models = null;
+    engineStatus.source = "health";
+  }
+  engineStatus.known = true;
+  engineStatus.ts = Date.now();
+  return engineStatus;
 }
 
 // El motor comparte un solo modelo y recorre las tejas activas en ronda, para
@@ -2533,7 +2593,7 @@ const aiEngine = {
 
     const list = [...this.active].filter(
       (c) => c.player.active && c.video.readyState >= 2 && c.video.videoWidth > 0 &&
-             isWithinSchedule(c.config.schedule)
+             isWithinSchedule(c.config.schedule) && browserTargets(c.config).length
     );
     if (list.length === 0) return;
 
@@ -3190,36 +3250,6 @@ function dismissAlarm(ctrl) {
 
 let aiModalCtrl = null;
 
-function openAiModal(ctrl) {
-  aiModalCtrl = ctrl;
-  const cfg = ctrl.config;
-  $("#aiCamName").textContent = ctrl.title;
-  $("#aiEnabled").checked = cfg.enabled;
-  $("#aiTarget").value = cfg.target;
-  $("#aiAction").value = cfg.action;
-  $("#aiScore").value = Math.round(cfg.minScore * 100);
-  $("#aiScoreVal").textContent = Math.round(cfg.minScore * 100) + "%";
-  $("#aiSound").checked = cfg.sound !== false;
-  $("#aiModelState").textContent = aiEngine.model
-    ? "Modelo listo."
-    : "El modelo se baja al activar (una vez).";
-  updateZoneState(ctrl);
-
-  const s = cfg.schedule || defaultAiConfig().schedule;
-  $("#aiSchedOn").checked = s.enabled;
-  $("#aiStart").value = s.start;
-  $("#aiEnd").value = s.end;
-  $$("#aiDays button").forEach((b) => {
-    const on = s.days.includes(Number(b.dataset.d));
-    b.classList.toggle("on", on);
-    b.setAttribute("aria-pressed", String(on));
-  });
-  refreshSchedBody();
-
-  $("#aiModal").hidden = false;
-  loadAlertBox(ctrl.streamId);
-}
-
 // ---- dispositivo de WhatsApp que envía (solo admin): estado / desvincular / vincular ----
 const WA_STATE_TXT = {
   open: ["on", "Vinculado"],
@@ -3546,6 +3576,26 @@ $("#alAdd").addEventListener("click", async () => {
 });
 
 // ---- avisos por WhatsApp / correo (regla del servidor; admin y seguridad) ----
+// Las clases que avisa la regla salen de lo que se vigila: «Persona sin casco»
+// → head; «Fuego o humo» → fuego + humo. (El servidor solo avisa de esas.)
+const ALERT_LABELS = { epp: "Persona sin casco", fuego: "Fuego o humo" };
+
+function alertClassesFor(targets) {
+  const out = [];
+  if (targets.includes("epp")) out.push("head");
+  if (targets.includes("fuego")) out.push("fuego", "humo");
+  return out;
+}
+
+function renderAlertChips() {
+  const chips = $("#alChips");
+  if (!chips) return;
+  const alertable = cleanTargets([...aiDraft.targets]).filter((t) => ALERT_LABELS[t]);
+  chips.replaceChildren(...(alertable.length
+    ? alertable.map((t) => { const s = document.createElement("span"); s.className = "ai-chip"; s.textContent = ALERT_LABELS[t]; return s; })
+    : [Object.assign(document.createElement("span"), { className: "ai-chip none", textContent: "Nada de lo elegido genera aviso" })]));
+}
+
 async function loadAlertBox(streamId) {
   const box = $("#aiAlertBox");
   box.hidden = !canAlerts();
@@ -3553,10 +3603,9 @@ async function loadAlertBox(streamId) {
   $("#alState").textContent = "";
   try {
     const a = await api("/api/settings/alerts");
+    if (!aiModalCtrl || aiModalCtrl.streamId !== streamId) return;   // se cerró o cambió de cámara
     const r = Object.assign({}, a.defaults, a.cameras[streamId] || {});
     $("#alEnabled").checked = !!r.enabled;
-    $("#alHead").checked = r.classes.includes("head");
-    $("#alFire").checked = r.classes.includes("fuego") || r.classes.includes("humo");
     $("#alHits").value = String(r.min_hits);
     $("#alCool").value = String(r.cooldown);
     const n = (a.recipients || []).filter((x) => x.enabled).length;
@@ -3566,18 +3615,17 @@ async function loadAlertBox(streamId) {
     $("#alChannels").textContent = ch.length
       ? `Se enviará por: ${ch.join(" y ")}.` +
         (a.pending ? ` ${a.pending} aviso(s) en cola esperando enlace.` : "")
-      : "Sin destinatarios: agrega números en Ajustes → Alertas.";
+      : "";
+    $("#alNoRecip").hidden = ch.length > 0;
     $("#alTest").disabled = !ch.length;
   } catch (e) {
     $("#alChannels").textContent = "No se pudo leer la configuración de avisos.";
   }
 }
 
-async function saveAlertRule(streamId) {
+async function saveAlertRule(streamId, targets) {
   if (!canAlerts() || $("#aiAlertBox").hidden) return;
-  const classes = [];
-  if ($("#alHead").checked) classes.push("head");
-  if ($("#alFire").checked) classes.push("fuego", "humo");
+  const classes = alertClassesFor(targets);
   await api(`/api/settings/alerts/${encodeURIComponent(streamId)}`, {
     method: "PUT",
     body: JSON.stringify({
@@ -3605,27 +3653,138 @@ $("#alTest").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
-["alHead", "alFire", "alHits", "alCool"].forEach((id) => {
+["alHits", "alCool"].forEach((id) => {
   $("#" + id).addEventListener("change", () => { $("#alEnabled").checked = true; });
 });
+$("#alGoSettings").addEventListener("click", (e) => {
+  e.preventDefault();
+  closeAiModal();
+  document.querySelector('.tab[data-view="ajustes"]').click();
+  ajSelect("alertas");
+});
 
-function readDays() {
-  return $$("#aiDays button.on").map((b) => Number(b.dataset.d));
+// ---- el modal: un borrador que se pinta con renderAiModal() y se guarda con «Guardar» ----
+const SENS_TEXT = { 60: " · solo lo muy claro", 25: " · más avisos, más falsos" };
+
+function renderAiModal() {
+  const ctrl = aiModalCtrl;
+  if (!ctrl) return;
+  const st = engineStatus;
+  const server = !!st.online;
+  const models = st.models;
+
+  // interruptor general
+  $("#aiOnLabel").textContent = $("#aiEnabled").checked ? "Vigilando" : "Apagada";
+
+  // franja del motor (C14)
+  const eng = $("#aiEngine");
+  eng.dataset.engine = st.known ? (server ? "server" : "browser") : "browser";
+  if (!st.known) {
+    $("#aiEngineTitle").textContent = "Comprobando el detector…";
+    $("#aiEngineText").textContent = "";
+  } else if (server) {
+    const can = [];
+    if (!models || models.general !== false) can.push("personas y vehículos");
+    if (!models || models.epp !== false) can.push("cascos");
+    if (!models || models.fuego !== false) can.push("fuego");
+    const falta = [];
+    if (models && models.epp === false) falta.push("cascos");
+    if (models && models.fuego === false) falta.push("fuego");
+    $("#aiEngineTitle").textContent = "Detección en el servidor";
+    $("#aiEngineText").textContent = "Funciona aunque nadie tenga el panel abierto. Detecta " + can.join(", ") + "." +
+      (falta.length ? " No tiene cargado el modelo de " + falta.join(" ni de ") + "." : "");
+  } else {
+    $("#aiEngineTitle").textContent = "Solo detección en este navegador";
+    $("#aiEngineText").textContent = "El detector del servidor no está activo: solo personas y vehículos, y solo mientras este panel esté abierto.";
+  }
+
+  // tarjetas de objetivo
+  let nActive = 0;
+  $$("#aiTargets .ai-target").forEach((card) => {
+    const t = card.dataset.t;
+    const input = card.querySelector("input");
+    const msg = card.querySelector(".ai-tblocked");
+    let blocked = "";
+    if (t === "epp" || t === "fuego") {
+      if (st.known && !server) blocked = "Necesita el detector del servidor";
+      else if (server && models && models[t] === false) blocked = t === "epp" ? "El servidor no tiene el modelo de cascos" : "El servidor no tiene el modelo de fuego";
+    }
+    const picked = aiDraft.targets.has(t);
+    input.checked = picked;
+    input.disabled = !!blocked;
+    card.classList.toggle("blocked", !!blocked);
+    msg.hidden = !blocked;
+    msg.textContent = blocked ? blocked + (picked ? " · tu elección se conserva" : "") : "";
+    if (picked && !blocked) nActive++;
+  });
+
+  // sensibilidad
+  const pct = Math.round(aiDraft.score * 100);
+  $$("#aiSens button").forEach((b) => b.setAttribute("aria-pressed", String(Math.abs(Number(b.dataset.s) - pct) < 3)));
+  const near = [60, 40, 25].find((p) => Math.abs(p - pct) < 3);
+  $("#aiSensText").textContent = `Confianza mínima ${pct} %` + (near ? SENS_TEXT[near] || "" : "");
+
+  // reacción en pantalla y sonido
+  $$("#aiActions button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.a === aiDraft.action)));
+
+  // cuándo
+  const sched = aiDraft.when === "sched";
+  $$("#aiWhen button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.when === aiDraft.when)));
+  $("#aiSchedBody").hidden = !sched;
+  $$("#aiDays button").forEach((b) => b.setAttribute("aria-pressed", String(aiDraft.days.has(Number(b.dataset.d)))));
+  $("#aiSchedHint").textContent = sched
+    ? scheduleSummary({ enabled: true, days: [...aiDraft.days], start: $("#aiStart").value, end: $("#aiEnd").value })
+    : "Vigila las 24 horas, todos los días.";
+
+  // dónde
+  const hasZone = Array.isArray(aiDraft.zone) && aiDraft.zone.length >= 3;
+  $("#aiZoneSvg").hidden = !hasZone;
+  $("#aiZonePoly").setAttribute("points", hasZone ? aiDraft.zone.map(([x, y]) => `${(x * 100).toFixed(2)},${(y * 100).toFixed(2)}`).join(" ") : "");
+  $("#aiZoneTag").textContent = hasZone ? "Zona definida" : "Toda la imagen";
+  $("#aiZoneState").textContent = hasZone ? "Solo cuenta lo que pasa dentro del área azul." : "Se vigila toda la imagen.";
+  $("#aiZoneAll").disabled = !hasZone;
+
+  renderAlertChips();
+
+  // pie
+  const on = $("#aiEnabled").checked;
+  $("#aiModelState").textContent = !on ? "La IA de esta cámara está apagada"
+    : `${nActive} objetivo${nActive === 1 ? "" : "s"}` +
+      (server ? " · procesa el servidor" : aiEngine.model ? " · modelo listo" : " · el modelo se descarga al guardar (una vez)");
 }
 
-function refreshSchedBody() {
-  const on = $("#aiSchedOn").checked;
-  $("#aiSchedBody").classList.toggle("on", on);
-  const sched = { enabled: on, days: readDays(),
-                  start: $("#aiStart").value, end: $("#aiEnd").value };
-  $("#aiSchedHint").textContent = scheduleSummary(sched);
-}
+// Estado del borrador del modal.
+const aiDraft = { targets: new Set(), score: 0.4, action: "full", when: "always", days: new Set(), zone: null, zoneAtOpen: null };
 
-function updateZoneState(ctrl) {
-  const has = Array.isArray(ctrl.config.zone) && ctrl.config.zone.length >= 3;
-  $("#aiZoneState").textContent = has
-    ? `Zona definida (${ctrl.config.zone.length} puntos). Solo ahí se detecta.`
-    : "Sin zona: se detecta en toda la imagen.";
+async function openAiModal(ctrl) {
+  aiModalCtrl = ctrl;
+  const cfg = ctrl.config;
+  $("#aiCamName").textContent = ctrl.title;
+  const dev = state.devices.get(String(ctrl.streamId).split("__")[0]);
+  $("#aiCamSub").textContent = dev ? `${dev.host}${dev.vendor && dev.vendor !== "desconocido" ? " · " + dev.vendor : ""}` : "";
+  $("#aiEnabled").checked = !!cfg.enabled;
+  aiDraft.targets = new Set(cfgTargets(cfg));
+  aiDraft.score = cfg.minScore ?? 0.4;
+  aiDraft.action = cfg.action || "full";
+  $("#aiSound").checked = cfg.sound !== false;
+  const s = cfg.schedule || defaultAiConfig().schedule;
+  aiDraft.when = s.enabled && s.days && s.days.length ? "sched" : "always";
+  aiDraft.days = new Set((s.days || []).map(Number));
+  $("#aiStart").value = s.start || "21:00";
+  $("#aiEnd").value = s.end || "06:00";
+  aiDraft.zone = cfg.zone || null;
+  aiDraft.zoneAtOpen = JSON.stringify(cfg.zone || null);
+  // vista de la cámara (fotograma ya guardado en el servidor) con la proporción real
+  const box = $(".ai-zonebox");
+  const ar = ctrl.vw && ctrl.vh ? Math.min(2, Math.max(1, ctrl.vw / ctrl.vh)) : 16 / 9;
+  box.style.aspectRatio = String(ar);
+  const url = ctrl.frameUrl || `/api/wall/${encodeURIComponent(ctrl.streamId)}/frame`;
+  $("#aiZoneImg").src = url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+  renderAiModal();
+  $("#aiModal").hidden = false;
+  loadAlertBox(ctrl.streamId);
+  await loadEngineStatus(true);
+  if (aiModalCtrl === ctrl) renderAiModal();
 }
 
 function closeAiModal() {
@@ -3633,38 +3792,70 @@ function closeAiModal() {
   aiModalCtrl = null;
 }
 
-$("#aiScore").addEventListener("input", (e) => {
-  $("#aiScoreVal").textContent = e.target.value + "%";
-});
+// Lo llama el editor de zona al guardar: la zona nueva pasa al borrador del modal.
+function updateZoneState(ctrl) {
+  if (ctrl !== aiModalCtrl) return;
+  aiDraft.zone = ctrl.config.zone || null;
+  aiDraft.zoneAtOpen = JSON.stringify(aiDraft.zone);
+  renderAiModal();
+}
 
+// Al volver del editor de zona (que guarda la zona por su cuenta) se adopta la nueva.
+new MutationObserver(() => {
+  const m = $("#aiModal");
+  if (m.hidden || !aiModalCtrl) return;
+  const cur = JSON.stringify(aiModalCtrl.config.zone || null);
+  if (cur !== aiDraft.zoneAtOpen) {
+    aiDraft.zone = aiModalCtrl.config.zone || null;
+    aiDraft.zoneAtOpen = cur;
+    renderAiModal();
+  }
+}).observe($("#aiModal"), { attributes: true, attributeFilter: ["hidden"] });
+
+// Tocar cualquier ajuste implica que la quieres activar: se marca sola la
+// casilla, para no caer en "guardé pero seguía desactivada".
+function aiTouch() { $("#aiEnabled").checked = true; renderAiModal(); }
+
+$("#aiEnabled").addEventListener("change", renderAiModal);
+$("#aiTargets").addEventListener("change", (e) => {
+  const input = e.target.closest("input[data-target]");
+  if (!input) return;
+  if (input.checked) aiDraft.targets.add(input.dataset.target); else aiDraft.targets.delete(input.dataset.target);
+  aiTouch();
+});
+$("#aiSens").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-s]");
+  if (!b) return;
+  aiDraft.score = Number(b.dataset.s) / 100;
+  aiTouch();
+});
+$("#aiActions").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-a]");
+  if (!b) return;
+  aiDraft.action = b.dataset.a;
+  aiTouch();
+});
 // Al marcar el sonido, suena una vez de prueba (y desbloquea el audio).
 $("#aiSound").addEventListener("change", () => {
   if ($("#aiSound").checked) { unlockAudio(); setTimeout(playAlarm, 60); }
 });
-
-// Tocar cualquier ajuste implica que la quieres activar: se marca sola la
-// casilla, para no caer en "guardé pero seguía desactivada".
-["aiTarget", "aiAction", "aiScore"].forEach((id) => {
-  $("#" + id).addEventListener("change", () => { $("#aiEnabled").checked = true; });
-});
-
-// Horario: días, franja y el interruptor "solo en un horario".
-$("#aiSchedOn").addEventListener("change", () => {
-  if ($("#aiSchedOn").checked) $("#aiEnabled").checked = true;
-  refreshSchedBody();
+$("#aiWhen").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-when]");
+  if (!b) return;
+  aiDraft.when = b.dataset.when;
+  aiTouch();
 });
 $("#aiDays").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-d]");
   if (!b) return;
-  b.classList.toggle("on");
-  b.setAttribute("aria-pressed", String(b.classList.contains("on")));
-  $("#aiEnabled").checked = true;
-  refreshSchedBody();
+  const d = Number(b.dataset.d);
+  if (aiDraft.days.has(d)) aiDraft.days.delete(d); else aiDraft.days.add(d);
+  aiTouch();
 });
-["aiStart", "aiEnd"].forEach((id) => {
-  $("#" + id).addEventListener("change", refreshSchedBody);
-});
+["aiStart", "aiEnd"].forEach((id) => { $("#" + id).addEventListener("change", renderAiModal); });
+$("#aiZoneAll").addEventListener("click", () => { aiDraft.zone = null; aiTouch(); });
 $("#aiClose").addEventListener("click", closeAiModal);
+$("#aiCancel").addEventListener("click", closeAiModal);
 $("#aiModal").addEventListener("click", (e) => {
   if (e.target.id === "aiModal") closeAiModal();
 });
@@ -3674,17 +3865,21 @@ $("#aiSave").addEventListener("click", async () => {
   const ctrl = aiModalCtrl;
   const btnSave = $("#aiSave");
   if (btnSave.disabled) return;   // ya hay un guardado en curso
+  const enabled = $("#aiEnabled").checked;
+  let targets = cleanTargets([...aiDraft.targets]);
+  if (enabled && !targets.length) return toast("Elige al menos una cosa que vigilar", true);
+  if (!targets.length) targets = cfgTargets(ctrl.config);   // apagada: se conserva la elección anterior
   btnSave.disabled = true;
   const next = {
-    enabled: $("#aiEnabled").checked,
-    target: $("#aiTarget").value,
-    action: $("#aiAction").value,
-    minScore: Number($("#aiScore").value) / 100,
+    enabled,
+    targets,
+    action: aiDraft.action,
+    minScore: aiDraft.score,
     sound: $("#aiSound").checked,
-    zone: ctrl.config.zone || null,   // la zona se edita aparte; se conserva
+    zone: aiDraft.zone || null,
     schedule: {
-      enabled: $("#aiSchedOn").checked,
-      days: readDays(),
+      enabled: aiDraft.when === "sched",
+      days: [...aiDraft.days].sort((a, b) => a - b),
       start: $("#aiStart").value,
       end: $("#aiEnd").value,
     },
@@ -3703,7 +3898,7 @@ $("#aiSave").addEventListener("click", async () => {
   refreshZoneTag(ctrl);
   refreshSchedTag(ctrl);
   try {
-    await saveAlertRule(ctrl.streamId);
+    await saveAlertRule(ctrl.streamId, targets);
   } catch (err) {
     toast("No se guardaron los avisos: " + err.message, true);
   }
@@ -3712,6 +3907,9 @@ $("#aiSave").addEventListener("click", async () => {
     if (state.serverDetection) {
       // El detector server-side la tomará (poll cada pocos segundos).
       toast(`IA activada en ${ctrl.title} (procesa el servidor)`);
+    } else if (!browserTargets(ctrl.config).length) {
+      // Solo pidió cosas que el navegador no sabe ver (cascos, fuego).
+      toast(`Guardado en ${ctrl.title}: ${targets.map(targetName).join(" y ")} necesita el detector del servidor, que ahora no está activo`, true);
     } else {
       const btn = $("#aiSave");
       btn.disabled = true;
@@ -3720,7 +3918,8 @@ $("#aiSave").addEventListener("click", async () => {
         await aiEngine.ensureModel();
         aiEngine.register(ctrl);
         goLive(ctrl);   // el análisis local necesita el vídeo corriendo
-        toast(`IA activada en ${ctrl.title}`);
+        const noWeb = targets.filter((t) => !BROWSER_TARGETS.includes(t));
+        toast(`IA activada en ${ctrl.title}` + (noWeb.length ? ` (en este navegador solo ${browserTargets(ctrl.config).map(targetName).join(" y ").toLowerCase()})` : ""));
       } catch (err) {
         toast(err.message, true);
         ctrl.config.enabled = false;
