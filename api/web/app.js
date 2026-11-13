@@ -839,6 +839,11 @@ async function enterWallView() {
 }
 window.CamWayWall = { sync: syncWall };   // lo usa dvr.js al abrir/cerrar
 
+// Tras un cambio hecho en sitio (PTZ) se actualiza la firma sin reconstruir.
+async function refreshWallSig() {
+  try { wallSig = JSON.stringify((await api("/api/wall")).tiles); } catch (_) { wallSig = null; }
+}
+
 // Mensaje dentro del muro (cargando / error) en lugar de «No hay streams
 // publicados», que solo es verdad cuando la API contestó con 0 cámaras.
 function showWallMessage(html) {
@@ -1125,29 +1130,40 @@ function makeTile(tile) {
     }
   });
 
-  // Ajuste por cámara: activar/desactivar PTZ (ONVIF). Solo admin.
+  // Ajuste por cámara: activar/desactivar PTZ (ONVIF). Solo admin. Se aplica en
+  // sitio (flechas y botón), sin rehacer el muro.
+  const ptzPad = el.querySelector(".ptzpad");
   const ptzCfgBtn = el.querySelector("[data-ptzcfg]");
+  const paintPtz = () => {
+    ptzPad.hidden = !tile.ptz;
+    if (!ptzCfgBtn) return;
+    ptzCfgBtn.classList.toggle("ptzon", !!tile.ptz);
+    ptzCfgBtn.title = tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)";
+  };
   if (ptzCfgBtn) ptzCfgBtn.addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const enabling = !tile.ptz;
-    if (!enabling && !confirm(`¿Desactivar el PTZ de "${tile.title}"?`)) return;
+    if (!enabling && !(await uiConfirm(`¿Desactivar el PTZ de "${tile.title}"?`, { okLabel: "Desactivar", danger: true }))) return;
     ptzCfgBtn.classList.add("busy");
     try {
       await api(`/api/devices/${tile.device_id}/ptz-config`, {
         method: "PUT", body: JSON.stringify({ enabled: enabling }) });
+      tile.ptz = enabling;
+      paintPtz();
       toast(enabling ? "PTZ activado." : "PTZ desactivado.");
-      await loadWall();      // refresca el mosaico para mostrar/ocultar las flechas
+      refreshWallSig();      // la firma del muro refleja el cambio: no hay recarga al volver
     } catch (e) {
       toast("PTZ: " + e.message, true);
+    } finally {
       ptzCfgBtn.classList.remove("busy");
     }
   });
 
-  // Controles PTZ (solo cámaras con PTZ): MANTENER PULSADO mueve de forma
-  // continua y suave; al soltar se detiene. Un toque corto = micro-movimiento.
-  if (tile.ptz) {
-    const pad = el.querySelector(".ptzpad");
-    pad.hidden = false;
+  // Controles PTZ (visibles solo si la cámara tiene PTZ activado): cada clic =
+  // un paso (mover y detener en la misma petición del servidor).
+  {
+    const pad = ptzPad;
+    paintPtz();
     pad.querySelectorAll("[data-ptz]").forEach((b) => {
       // Movimiento POR PASOS: cada clic = mover+detener en la MISMA petición del
       // servidor. El stop siempre ocurre → es imposible que la cámara quede
@@ -1567,7 +1583,9 @@ $("#btnLight").addEventListener("click", () => {
   lightMode = !lightMode;
   try { localStorage.setItem("camway.light", lightMode ? "1" : "0"); } catch (_) {}
   applyLightBtn();
-  loadWall();   // re-aplica el ritmo y el tamaño de fotograma
+  // El ritmo y el ancho del fotograma se leen en cada petición: basta reiniciar
+  // el temporizador, sin tocar las tejas.
+  if (wallRunning) startWallFeeds();
   toast(lightMode ? "Modo ligero activado (este equipo)" : "Modo ligero desactivado");
 });
 applyLightBtn();
@@ -1604,7 +1622,18 @@ $("#btnMosaicMode")?.addEventListener("click", () => {
   toast(mosaicChoice === "live"
     ? "Mosaico en vídeo en vivo (fluido; ideal para pocas cámaras)"
     : "Mosaico en fotogramas (ligero; ideal para muchas cámaras)");
-  loadWall();   // re-arma el mosaico en el modo elegido
+  // Cambio en sitio: las tejas se conservan; solo se sube/baja el vídeo.
+  liveMosaic = mosaicChoice === "live";
+  applyMosaicModeBtn();
+  if (wallRunning) {
+    if (!liveMosaic) {
+      state.tiles.forEach((c) => { if (!_zoomActive(c.el)) dropLive(c); });
+      autoLiveSet = new Set();
+    }
+    startWallFeeds();
+    const big = enlargedCtrl();
+    if (big) goLive(big);
+  }
 });
 
 // ---- comandos de kiosco para el equipo cliente (Ajustes) ----
