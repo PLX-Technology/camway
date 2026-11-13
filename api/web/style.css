@@ -127,7 +127,6 @@ button[data-talk].talking {
 @keyframes talkpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,91,77,.6); } 50% { box-shadow: 0 0 0 5px rgba(255,91,77,0); } }
 /* Grabación local */
 button[data-rec].recon { color: #ff5b4d; border-color: #ff5b4d; }
-button[data-rec].recon::after { content: ""; }
 button[data-ptzcfg].ptzon { color: #38d39f; border-color: #38d39f; }
 .recfields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
 .recfields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
@@ -243,16 +242,10 @@ summary:hover { color: var(--text); }
 /* ---------------------------------------------------------- mosaico */
 .wall { display: flex; flex-direction: column; gap: 14px; }
 
-/* Modo "ajustar a pantalla": encabezado opcional + una sola rejilla que llena
-   el viewport, sin scroll */
+/* Modo "ajustar a pantalla": una sola rejilla que llena el viewport, sin scroll */
 .wall.fit {
   display: flex; flex-direction: column; gap: 0; overflow: hidden; background: #000;
 }
-.wall.fit .wallheader {
-  height: 52px; flex: 0 0 auto; display: flex; align-items: center;
-  padding: 0 16px; background: #0b0f14; border-bottom: 1px solid var(--line);
-}
-.wall.fit .wallheader img { max-height: 40px; max-width: 320px; object-fit: contain; }
 .wall.fit .fitgrid {
   flex: 1 1 auto; display: grid; gap: 4px; min-height: 0;
 }
@@ -458,23 +451,11 @@ button.primary.danger:hover:not(:disabled) { background: #d0342b; }
 }
 .panel h2 { font-size: 15px; margin: 0 0 8px; }
 .hint { font-size: 12px; color: var(--muted); margin: 6px 0 14px; }
-.credrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.credrow input { width: 170px; }
-.credlist { list-style: none; margin: 0; padding: 0; }
-.credlist li {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border: 1px solid var(--line);
-  border-radius: 7px; margin-bottom: 7px; background: var(--panel-2); font-size: 13px;
-}
-.credlist .u { font-family: "Cascadia Code", Consolas, monospace; }
-.credlist .l { color: var(--muted); flex: 1; font-size: 12px; }
 .settingsgrid {
   display: grid; gap: 12px; margin-bottom: 14px;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 .settingsgrid label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
-.reprobe { margin-top: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.reprobe .hint { margin: 0; }
 
 /* ---------------------------------------------------------- aviso */
 .toast {
@@ -506,9 +487,9 @@ button.primary.danger:hover:not(:disabled) { background: #d0342b; }
 .dvrview { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; flex-direction: column; }
 .dvrview[hidden] { display: none; }
 .dvr-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; height: 42px;
-  background: #0b0f14; border-bottom: 1px solid var(--line); color: var(--fg); flex: none; }
+  background: #0b0f14; border-bottom: 1px solid var(--line); color: var(--text); flex: none; }
 .dvr-title { font-weight: 600; font-size: 13px; color: var(--muted); }
-.dvr-sel { background: #0f141b; color: var(--fg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font: inherit; }
+.dvr-sel { background: #0f141b; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font: inherit; }
 .dvr-pager { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .dvr-btn { background: rgba(255,255,255,.1); color: #fff; border: 0; border-radius: 7px; width: 32px; height: 30px; cursor: pointer; font-size: 14px; }
 .dvr-btn:hover { background: rgba(255,255,255,.22); }
@@ -558,7 +539,6 @@ button.primary.danger:hover:not(:disabled) { background: #d0342b; }
   background: var(--bg, #0d1117); color: inherit;
 }
 .userform input { flex: 1; min-width: 140px; }
-.ucams { margin: 8px 0; }
 .camchecks {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px; margin-top: 6px; max-height: 340px; overflow: auto;
@@ -720,7 +700,6 @@ button.primary.danger:hover:not(:disabled) { background: #d0342b; }
 .sitebadge[hidden] { display: none; }   /* display:inline-block pisaba el atributo hidden: salía una píldora vacía */
 .sitebadge.wallsite { font-size: 15px; margin-right: 10px; }
 .authsite { margin-top: 6px; font-size: 16px; font-weight: 700; letter-spacing: .4px; color: #2dd4bf; text-align: center; }
-.dvr-site { color: #2dd4bf; font-weight: 700; }
 
 
 /* Salud del equipo (Ajustes) */
