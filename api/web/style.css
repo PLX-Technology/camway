@@ -724,6 +724,16 @@ button.primary.danger:hover:not(:disabled) { background: #d0342b; }
 .hscont th { color: var(--muted); font-weight: 600; }
 .hsstat-ok { color: var(--ok); } .hsstat-warn { color: var(--warn); } .hsstat-bad { color: var(--bad); }
 
+/* ---------------------------------------------------------- utilidades (sustituyen estilos en línea) */
+.subhead { margin: 16px 0 4px; font-size: 13px; }
+.mt-6 { margin-top: 6px; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+/* Gestión (app.js): tarjeta de equipo y filas de usuario */
+.cardtitle .btnpush { margin-left: auto; }          /* botón «Nombrar» de la tarjeta de equipo */
+.rowedit { flex-basis: 100%; }                      /* desplegable «Cámaras» de una fila de usuario (dentro del <li> flex) */
+.rowedit .rowsave { margin-top: 6px; }              /* botón «Guardar cámaras» dentro de .rowedit */
+
 /* ---------------------------------------------------------- pantallas chicas */
 /* Un modal alto (p. ej. el de IA) hace scroll dentro de su tarjeta en vez de salirse. */
 .modalcard { max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow-y: auto; }

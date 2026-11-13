@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" href="/static/favicon-512.png">
-<link rel="stylesheet" href="/static/style.css?v=43">
+<link rel="stylesheet" href="/static/style.css?v=44">
 </head>
 <body>
 
@@ -207,7 +207,7 @@
       <button id="alAdd" class="primary">Agregar número</button>
     </div>
     <ul id="alList" class="userlist"></ul>
-    <h3 style="margin:16px 0 4px;font-size:13px">Últimos avisos</h3>
+    <h3 class="subhead">Últimos avisos</h3>
     <ul id="alLog" class="userlist"></ul>
   </section>
 
@@ -332,7 +332,7 @@
       <img id="waQr" alt="Código QR de WhatsApp" hidden>
       <p class="hint" id="waQrMsg">Generando código…</p>
     </div>
-    <p class="hint" style="margin-top:12px">¿No puedes escanear? Vincula con el número de teléfono:</p>
+    <p class="hint mt-12">¿No puedes escanear? Vincula con el número de teléfono:</p>
     <div class="userform">
       <input id="waPhone" aria-label="Número del celular" type="tel" placeholder="número del celular, ej. +58 414 1234567" autocomplete="off">
       <button id="waPair" class="ghost" type="button">Obtener código</button>
@@ -378,7 +378,7 @@
       </label>
     </div>
 
-    <label class="aitoggle" style="margin-top:12px">
+    <label class="aitoggle mt-12">
       <input type="checkbox" id="aiSound"> Reproducir sonido de alarma al detectar
     </label>
 
@@ -411,7 +411,7 @@
          funciona aunque nadie tenga el DVR abierto). Solo admin. -->
     <div class="aisched" id="aiAlertBox" hidden>
       <label class="aitoggle"><input type="checkbox" id="alEnabled"> 📲 Avisar con foto por WhatsApp / correo</label>
-      <div id="alBody" style="margin-top:8px">
+      <div id="alBody" class="mt-8">
         <p class="hint" id="alChannels"></p>
         <div class="aigrid">
           <label class="aitoggle"><input type="checkbox" id="alHead"> ⛑️ Persona sin casco</label>
@@ -465,7 +465,7 @@
     <label class="aitoggle"><input type="checkbox" id="osdShowName" checked> Mostrar el nombre</label>
     <label class="aitoggle"><input type="checkbox" id="osdShowTime" checked> Mostrar fecha y hora</label>
     <label class="aitoggle"><input type="checkbox" id="osdSetTime"> Poner la cámara en hora</label>
-    <div class="aigrid" id="osdNtpRow" style="margin-top:6px">
+    <div class="aigrid mt-6" id="osdNtpRow">
       <label>Servidor NTP (sincronía permanente)
         <input type="text" id="osdNtp" placeholder="p.ej. 172.16.10.83 o pool.ntp.org">
       </label>
