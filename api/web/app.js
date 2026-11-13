@@ -887,8 +887,8 @@ function makeTile(tile) {
     </div>
     <div class="tilebar">
       <span class="draghandle" title="Arrastrar">⠿</span>
-      <span class="t">${tile.title}</span>
-      <span class="chip">${tile.codec}</span>
+      <span class="t">${esc(tile.title)}</span>
+      <span class="chip">${esc(tile.codec)}</span>
       ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio">🔇</button>` : ""}
       ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)">🎙️</button>` : ""}
       ${isAdmin() ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local">⏺</button>` : ""}

@@ -4,6 +4,13 @@
 
 const $ = (s) => document.querySelector(s);
 const grid = $("#grid");
+// Escapa texto de la API antes de meterlo en innerHTML (los nombres de cámara
+// los puede escribir cualquier equipo de la LAN).
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 const MAX_TILES = 9;
 const WEBRTC_OK = typeof RTCPeerConnection !== "undefined";
 const HLS_CFG = { maxBufferLength: 6, maxMaxBufferLength: 10, backBufferLength: 0,
@@ -100,7 +107,7 @@ function buildGrid(list) {
     const el = document.createElement("div");
     el.className = "cell";
     el.innerHTML = `<video muted playsinline autoplay></video>
-      <div class="st">Conectando…</div><div class="lbl">${tile.title || ""}</div>`;
+      <div class="st">Conectando…</div><div class="lbl">${esc(tile.title || "")}</div>`;
     grid.appendChild(el);
     const video = el.querySelector("video");
     video.addEventListener("playing", () => { el.querySelector(".st")?.remove(); });
@@ -153,7 +160,7 @@ function recOpen() { return $("#rec").classList.contains("show"); }
 function openPanel(title, items, onBack) {
   // items: [{label, muted?, onSelect?}]
   const p = $("#panel");
-  p.innerHTML = `<div class="pbox"><h2>${title}</h2><div class="plist"></div></div>`;
+  p.innerHTML = `<div class="pbox"><h2>${esc(title)}</h2><div class="plist"></div></div>`;
   const list = p.querySelector(".plist");
   const btns = [];
   items.forEach((it) => {
