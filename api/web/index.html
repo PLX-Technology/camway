@@ -144,11 +144,11 @@
 </main>
 
 <!-- Reproductor de grabación -->
-<div id="recPlayer" class="modal" hidden>
+<div id="recPlayer" class="modal" role="dialog" aria-modal="true" aria-labelledby="recPlayTitle" hidden>
   <div class="modalcard recplayercard">
     <div class="modalhead">
       <h3 id="recPlayTitle">Grabación</h3>
-      <button class="ghost small" id="recPlayClose">Cerrar</button>
+      <button class="ghost small" id="recPlayClose" data-modal-close>Cerrar</button>
     </div>
     <video id="recVideo" controls autoplay playsinline></video>
     <div class="aifoot">
@@ -319,11 +319,11 @@
 </main>
 
 <!-- Vincular el WhatsApp que envía los avisos (QR o código) -->
-<div id="waModal" class="modal" hidden>
+<div id="waModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="waModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3>Vincular WhatsApp que enviará las alertas</h3>
-      <button class="ghost small" id="waClose">Cerrar</button>
+      <h3 id="waModalTitle">Vincular WhatsApp que enviará las alertas</h3>
+      <button class="ghost small" id="waClose" data-modal-close>Cerrar</button>
     </div>
     <p class="hint">En el celular del número que enviará las alertas abre
       <strong>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</strong>
@@ -343,11 +343,11 @@
 </div>
 
 <!-- Configuración de IA por cámara -->
-<div id="aiModal" class="modal" hidden>
+<div id="aiModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3>Comportamiento IA — <span id="aiCamName"></span></h3>
-      <button class="ghost small" id="aiClose">Cerrar</button>
+      <h3 id="aiModalTitle">Comportamiento IA — <span id="aiCamName"></span></h3>
+      <button class="ghost small" id="aiClose" data-modal-close>Cerrar</button>
     </div>
     <p class="hint">La detección corre en el servidor (YOLO) cuando está disponible;
       si no, en el navegador como respaldo. El sonido suena en este navegador.</p>
@@ -447,11 +447,11 @@
 </div>
 
 <!-- OSD: nombre y fecha/hora QUEMADOS en la cámara -->
-<div id="osdModal" class="modal" hidden>
+<div id="osdModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="osdModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3>OSD en la cámara — <span id="osdCamName"></span></h3>
-      <button class="ghost small" id="osdClose">Cerrar</button>
+      <h3 id="osdModalTitle">OSD en la cámara — <span id="osdCamName"></span></h3>
+      <button class="ghost small" id="osdClose" data-modal-close>Cerrar</button>
     </div>
     <p class="hint">Escribe el nombre y el sello de fecha/hora <strong>DENTRO de la cámara</strong>:
       queda grabado en el propio video y en las grabaciones (lo ve cualquier reproductor).
@@ -481,12 +481,12 @@
 </div>
 
 <!-- Editor de zona de detección (trazado libre) -->
-<div id="zoneEditor" class="modal" hidden>
+<div id="zoneEditor" class="modal" role="dialog" aria-modal="true" aria-labelledby="zoneModalTitle" hidden>
   <div class="modalcard zonecard">
     <div class="modalhead">
-      <h3>Zona de detección — <span id="zoneCamName"></span></h3>
+      <h3 id="zoneModalTitle">Zona de detección — <span id="zoneCamName"></span></h3>
       <button class="ghost small" id="zoneNewWin" title="Editar en una ventana aparte, más grande">⤢ Ventana nueva</button>
-      <button class="ghost small" id="zoneCancel">Cancelar</button>
+      <button class="ghost small" id="zoneCancel" data-modal-close>Cancelar</button>
     </div>
     <p class="hint">Mantén presionado y <strong>traza</strong> el área donde quieres detectar
       (por ejemplo, solo el parking). Fuera de la zona se ignora. Sin zona, se
@@ -505,7 +505,7 @@
 </div>
 
 <!-- ------------------------------------------------ LOGIN / SETUP -->
-<div id="authOverlay" class="authoverlay" hidden>
+<div id="authOverlay" class="authoverlay" role="dialog" aria-modal="true" aria-label="Acceso a CamWay" hidden>
   <div class="authcard">
     <div class="authbrand">
       <img id="authLogo" class="authlogo" alt="" hidden>
