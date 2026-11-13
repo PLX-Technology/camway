@@ -382,7 +382,7 @@ function renderDevice(dev, animate) {
       <div class="cardtitle">
         <span class="host">${esc(dev.host)}:${esc(dev.port)}</span>
         <span class="name" data-name>${esc(dev.name)}</span>
-        <button class="ghost small" data-act="rename" style="margin-left:auto">Nombrar</button>
+        <button class="ghost small btnpush" data-act="rename">Nombrar</button>
         <button class="ghost small" data-act="osd">OSD</button>
         <button class="ghost small" data-act="forget">Olvidar</button>
       </div>
@@ -1843,10 +1843,9 @@ const aiEngine = {
 // Procesa detecciones (vengan del modelo local o del detector server-side):
 // pinta las cajas, filtra por clase/umbral/zona, maneja el reconocimiento y
 // dispara la alarma. `preds` = [{class, score, bbox:[x,y,w,h en px del frame]}].
-// serverAlarm: cuando viene del detector server-side, es true/false según SU
-// rastreo (que sobrevive a recargas del navegador). undefined = modelo local
-// (respaldo), y entonces el rastreo lo hace el navegador.
-function processDetections(ctrl, preds, serverAlarm) {
+// El rastreo (alarma «solo si es nuevo») lo hace siempre el navegador, también
+// con las cajas crudas que llegan del detector server-side.
+function processDetections(ctrl, preds) {
   if (!ctrl.config.enabled) { clearOverlay(ctrl); return; }   // IA apagada: nada de cajas
   if (!isWithinSchedule(ctrl.config.schedule)) { clearOverlay(ctrl); return; }
 
@@ -1869,18 +1868,6 @@ function processDetections(ctrl, preds, serverAlarm) {
   });
 
   const now = Date.now();
-
-  // --- Camino server-side: la decisión de alarma la trae el evento ---
-  if (serverAlarm !== undefined) {
-    if (!hits.length) return;
-    // OJO: solo un disparo real (serverAlarm) refresca lastHit. Si el objeto
-    // sigue a la vista pero quieto, NO se revive la alarma; así la cámara
-    // ampliada vuelve a fotograma tras AI_CLEAR_MS aunque el objeto siga ahí
-    // (si se mueve otra vez, onDetection vuelve a dispararla).
-    if (serverAlarm) onDetection(ctrl, hits);              // algo nuevo/movido
-    else if (ctrl.alarmed) updateAlertLabel(ctrl, hits);   // sigue ahí: solo refresca etiqueta
-    return;
-  }
 
   // --- Rastreo en el navegador (por usuario), por IoU ---
   // Se empareja cada detección con el track existente que MÁS se solapa (IoU).
@@ -3798,12 +3785,10 @@ function userRow(u) {
     editBtn.disabled = true;
     const wrap = document.createElement("div");
     wrap.className = "rowedit";
-    wrap.style.flexBasis = "100%";
     const box = document.createElement("div");
     box.className = "camchecks";
     const save = document.createElement("button");
-    save.className = "primary small"; save.textContent = "Guardar cámaras";
-    save.style.marginTop = "6px";
+    save.className = "primary small rowsave"; save.textContent = "Guardar cámaras";
     wrap.append(box, save);
     try { await buildCamChecks(box, u.cameras); }
     finally { editBtn.disabled = false; }
