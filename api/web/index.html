@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" href="/static/favicon-512.png">
-<link rel="stylesheet" href="/static/style.css?v=50">
+<link rel="stylesheet" href="/static/style.css?v=51">
 <link rel="stylesheet" href="/static/wall.css?v=1">
 <link rel="stylesheet" href="/static/gestion.css?v=1">
 </head>
@@ -508,28 +508,36 @@
 
 <!-- ------------------------------------------------ LOGIN / SETUP -->
 <div id="authOverlay" class="authoverlay" role="dialog" aria-modal="true" aria-label="Acceso a CamWay" hidden>
-  <div class="authcard">
+  <div class="authcard cw-card">
     <div class="authbrand">
       <img id="authLogo" class="authlogo" alt="" hidden>
-      <h1 id="authTitle">CamWay</h1>
+      <h1 id="authTitle"><span class="mark" aria-hidden="true"><svg width="32" height="32" viewBox="0 0 28 28" focusable="false"><circle cx="14" cy="14" r="11" fill="none" stroke="#4C8DFF" stroke-width="3"/><circle cx="14" cy="14" r="4.5" fill="#4C8DFF"/><circle cx="22" cy="6" r="2.6" fill="#F04438"/></svg></span>CamWay</h1>
       <div class="authsite" id="authSite" hidden></div>
     </div>
 
-    <form id="loginForm" class="authform" hidden>
-      <h3>Iniciar sesión</h3>
-      <input id="logUser" aria-label="Usuario" type="text" placeholder="usuario" autocomplete="username" spellcheck="false">
-      <input id="logPass" aria-label="Contraseña" type="password" placeholder="contraseña" autocomplete="current-password">
-      <button class="primary" type="submit">Entrar</button>
+    <form id="loginForm" class="cw-login" hidden>
+      <h2>Iniciar sesión</h2>
+      <label class="cw-field">Usuario
+        <input id="logUser" type="text" autocomplete="username" spellcheck="false">
+      </label>
+      <label class="cw-field">Contraseña
+        <input id="logPass" type="password" autocomplete="current-password">
+      </label>
       <p class="autherr" id="loginErr" role="alert" hidden></p>
+      <button class="cw-btn cw-btn--primary cw-btn--block" type="submit">Entrar</button>
     </form>
 
-    <form id="setupForm" class="authform" hidden>
-      <h3>Crear administrador</h3>
+    <form id="setupForm" class="cw-login" hidden>
+      <h2>Crear administrador</h2>
       <p class="hint">Primer arranque: define la cuenta de administrador.</p>
-      <input id="setUser" aria-label="Usuario administrador" type="text" placeholder="usuario admin" autocomplete="username" spellcheck="false">
-      <input id="setPass" aria-label="Contraseña" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
-      <button class="primary" type="submit">Crear y entrar</button>
+      <label class="cw-field">Usuario administrador
+        <input id="setUser" type="text" autocomplete="username" spellcheck="false">
+      </label>
+      <label class="cw-field">Contraseña (mínimo 4 caracteres)
+        <input id="setPass" type="password" autocomplete="new-password">
+      </label>
       <p class="autherr" id="setupErr" role="alert" hidden></p>
+      <button class="cw-btn cw-btn--primary cw-btn--block" type="submit">Crear y entrar</button>
     </form>
   </div>
 </div>
@@ -567,7 +575,7 @@
 <!-- La IA de respaldo del navegador (tf.min.js + coco-ssd.min.js, locales y offline)
      se carga bajo demanda desde app.js (loadTensorflow), no aquí. -->
 <script src="/static/icons.js?v=1"></script>
-<script src="/static/ui.js?v=4"></script>
+<script src="/static/ui.js?v=5"></script>
 <script src="/static/whep.js?v=2"></script>
 <script src="/static/dvr.js?v=9"></script>
 <script src="/static/app.js?v=97"></script>

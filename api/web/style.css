@@ -416,23 +416,27 @@ summary:hover { color: var(--text); }
 /* Modal de configuración IA */
 .modal {
   position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center;
+  background: rgba(5, 8, 12, .72); display: flex; align-items: center; justify-content: center;
   padding: 20px;
 }
 .modal[hidden] { display: none; }
 .modalcard {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 20px; width: 460px; max-width: 100%;
+  background: var(--cw-panel); border: 1px solid var(--cw-line-soft);
+  border-radius: 16px; padding: 20px; width: 460px; max-width: 100%;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
 }
 /* Diálogos propios (ui.js: uiPrompt / uiConfirm) */
 .uicard { width: 420px; display: flex; flex-direction: column; gap: 12px; }
-.uimsg { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.uitop { display: flex; align-items: flex-start; gap: 12px; }
+.uitop .cw-ib { margin: -4px -4px 0 auto; width: 32px; height: 32px; flex: none; }
+.uimsg { margin: 0; flex: 1; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .uifield { width: 100%; }
 .uibtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 button.primary.danger { background: #B3261E; border-color: #B3261E; color: #fff; }   /* texto blanco 6,5:1 */
 button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: #C9302A; }
-.modalhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.modalhead h3 { margin: 0; font-size: 15px; }
+.modalhead { display: flex; align-items: center; justify-content: flex-start; margin-bottom: 10px; }
+.modalhead .cw-ib { width: 32px; height: 32px; flex: none; }
+.modalhead h3 { margin: 0 auto 0 0; font-size: 16px; font-weight: 600; }
 .aitoggle { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-size: 14px; cursor: pointer; }
 .aitoggle input { width: auto; }
 .aigrid { display: flex; flex-direction: column; gap: 12px; }
@@ -494,30 +498,57 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 .settingsgrid label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
 
 /* ---------------------------------------------------------- aviso */
+/* Color + ícono + texto: el estado nunca va solo en el color. ui.js pone role=status/alert. */
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-  background: var(--panel-2); border: 1px solid var(--line);
-  padding: 11px 18px; border-radius: 8px; font-size: 13px;
-  z-index: 50; box-shadow: 0 6px 24px rgba(0,0,0,.5);
+  display: flex; align-items: center; gap: 10px;
+  max-width: min(520px, calc(100vw - 24px));
+  background: var(--cw-control); border: 1px solid var(--cw-line);
+  color: var(--cw-text); padding: 11px 16px; border-radius: 12px; font-size: 13px; line-height: 1.4;
+  z-index: 1100; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  animation: toastin .18s ease-out;
 }
-.toast.err { border-color: var(--cw-bad-line); color: var(--cw-bad); }
+.toast[hidden] { display: none; }
+.toast::before {
+  content: ""; flex: none; width: 18px; height: 18px; background: var(--cw-ok);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.toast.err { background: var(--cw-bad-bg); border-color: var(--cw-bad-line); color: var(--cw-bad); }
+.toast.err::before {
+  background: var(--cw-bad);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 8v5M12 16.5h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 8v5M12 16.5h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+@keyframes toastin { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 
 /* ---------------- login / setup ---------------- */
 .authoverlay {
   position: fixed; inset: 0; z-index: 100;
   display: flex; align-items: center; justify-content: center;
-  background: var(--bg); padding: 16px;
+  background: radial-gradient(900px 480px at 50% -8%, #132038 0%, var(--cw-bg) 62%);
+  padding: 16px; overflow-y: auto;
 }
 .authcard {
-  width: 100%; max-width: 400px; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 16px; padding: 32px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  width: 100%; max-width: 400px; border-radius: 16px; padding: 32px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
 }
-.authbrand {
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-  margin-bottom: 24px;
-}
+.authbrand { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 24px; }
+.authbrand h1 { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.authbrand h1[hidden] { display: none; }
 .authlogo { max-height: 128px; max-width: 300px; object-fit: contain; }
+.authsite { font-size: 14px; font-weight: 600; color: var(--cw-muted); text-align: center; }
+.authsite[hidden] { display: none; }
+.cw-login { display: flex; flex-direction: column; gap: 14px; }
+.cw-login[hidden] { display: none; }
+.cw-login h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.cw-login .hint { margin: -6px 0 0; }
+.cw-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #C4CDD8; }
+.cw-field input { height: 40px; padding: 0 12px; border-radius: 10px; font-size: 14px; color: var(--cw-text); }
+.cw-btn--block { width: 100%; height: 40px; justify-content: center; }
+.autherr { color: var(--cw-bad); font-size: 13px; margin: 0; }
+.autherr[hidden] { display: none; }
 
 /* ---------------- Vista DVR (cuadrícula limpia estilo DVR) ---------------- */
 .dvrview { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; flex-direction: column; }
@@ -553,7 +584,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 .dvr-max video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .dvr-max .dvr-name { position: absolute; left: 14px; bottom: 12px; font-size: 16px; font-weight: 700; color: #fff; text-shadow: 0 1px 4px #000; }
 .dvr-hint { position: absolute; right: 14px; top: 10px; font-size: 11px; color: var(--muted); background: rgba(0,0,0,.5); padding: 3px 9px; border-radius: 999px; }
-.authbrand h1 { font-size: 20px; margin: 0; }
 .authform { display: flex; flex-direction: column; gap: 10px; }
 .authform h3 { margin: 0 0 4px; }
 .authform input {
@@ -561,7 +591,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
   background: var(--bg); color: inherit; font-size: 14px;
 }
 .authform button { margin-top: 4px; padding: 10px; }
-.autherr { color: var(--cw-bad); font-size: 13px; margin: 2px 0 0; }
 
 /* ---------------- caja de usuario en el header ---------------- */
 .userbox { display: inline-flex; align-items: center; gap: 8px; }
@@ -740,7 +769,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 }
 .sitebadge[hidden] { display: none; }   /* display:inline-block pisaba el atributo hidden: salía una píldora vacía */
 .sitebadge.wallsite { font-size: 14px; font-weight: 600; color: var(--cw-text); margin-right: 10px; }
-.authsite { margin-top: 6px; font-size: 16px; font-weight: 700; letter-spacing: .4px; color: #2dd4bf; text-align: center; }
 
 
 /* Salud del equipo (Ajustes) */
@@ -873,7 +901,7 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
   .timerow { flex-wrap: wrap; }
 
   /* login */
-  .authcard { padding: 20px; }
+  .authcard { padding: 24px 20px; }
 
   /* vista DVR */
   .dvr-bar { gap: 6px; padding: 4px 8px; }
