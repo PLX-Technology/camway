@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" href="/static/favicon-512.png">
-<link rel="stylesheet" href="/static/style.css?v=45">
+<link rel="stylesheet" href="/static/style.css?v=52">
 <link rel="stylesheet" href="/static/wall.css?v=1">
 <link rel="stylesheet" href="/static/gestion.css?v=1">
 </head>
@@ -16,23 +16,23 @@
 <header class="topbar">
   <div class="brand">
     <img id="brandLogo" class="brandlogo" alt="CamWay" hidden>
-    <span class="mark" id="brandMark"></span>
+    <span class="mark" id="brandMark" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 28 28" focusable="false"><circle cx="14" cy="14" r="11" fill="none" stroke="#4C8DFF" stroke-width="3"/><circle cx="14" cy="14" r="4.5" fill="#4C8DFF"/><circle cx="22" cy="6" r="2.6" fill="#F04438"/></svg></span>
     <h1 id="brandTitle">CamWay</h1>
     <span class="sitebadge" id="siteBadge" hidden title="Taladro / sitio de esta instancia de CamWay"></span>
     <span class="tag" id="tagDevices">—</span>
   </div>
   <nav class="tabs" role="tablist" aria-label="Secciones">
-    <button class="tab" role="tab" aria-selected="false" aria-controls="view-inventario" data-view="inventario" data-admin>Inventario</button>
-    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-mosaico" data-view="mosaico">Mosaico</button>
-    <button class="tab" role="tab" aria-selected="false" aria-controls="view-grabaciones" data-view="grabaciones">Grabaciones</button>
-    <button class="tab" role="tab" aria-selected="false" aria-controls="view-ajustes" data-view="ajustes" data-admin>Ajustes</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-inventario" data-view="inventario" data-admin><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 10l5-3v10l-5-3z"/><rect x="2" y="6" width="13" height="12" rx="2"/></svg>Cámaras</button>
+    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-mosaico" data-view="mosaico"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Mosaico</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-grabaciones" data-view="grabaciones"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></svg>Grabaciones</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-ajustes" data-view="ajustes" data-admin><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>Ajustes</button>
   </nav>
   <div class="health">
-    <span class="dot" id="dotApi" title="API" role="img" aria-label="Estado de la API"></span> API
-    <span class="dot" id="dotMtx" title="MediaMTX" role="img" aria-label="Estado de MediaMTX"></span> MediaMTX
+    <span class="hstat"><span class="dot" id="dotApi" data-label="Servidor" title="Servidor (API del panel)" role="img" aria-label="Servidor"></span><span class="hlabel">Servidor</span></span>
+    <span class="hstat"><span class="dot" id="dotMtx" data-label="Vídeo" title="Vídeo (MediaMTX)" role="img" aria-label="Vídeo"></span><span class="hlabel">Vídeo</span></span>
     <span class="userbox" id="userBox" hidden>
-      <span class="usericon" aria-hidden="true">◍</span><span id="userName"></span>
-      <button id="btnLogout" class="ghost small" title="Cerrar sesión" aria-label="Cerrar sesión">Salir</button>
+      <span class="usericon" aria-hidden="true"></span><span id="userName"></span>
+      <button id="btnLogout" class="cw-btn cw-btn--sm" title="Cerrar sesión" aria-label="Cerrar sesión"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span class="btnlabel">Salir</span></button>
     </span>
   </div>
 </header>
@@ -508,28 +508,36 @@
 
 <!-- ------------------------------------------------ LOGIN / SETUP -->
 <div id="authOverlay" class="authoverlay" role="dialog" aria-modal="true" aria-label="Acceso a CamWay" hidden>
-  <div class="authcard">
+  <div class="authcard cw-card">
     <div class="authbrand">
       <img id="authLogo" class="authlogo" alt="" hidden>
-      <h1 id="authTitle">CamWay</h1>
+      <h1 id="authTitle"><span class="mark" aria-hidden="true"><svg width="32" height="32" viewBox="0 0 28 28" focusable="false"><circle cx="14" cy="14" r="11" fill="none" stroke="#4C8DFF" stroke-width="3"/><circle cx="14" cy="14" r="4.5" fill="#4C8DFF"/><circle cx="22" cy="6" r="2.6" fill="#F04438"/></svg></span>CamWay</h1>
       <div class="authsite" id="authSite" hidden></div>
     </div>
 
-    <form id="loginForm" class="authform" hidden>
-      <h3>Iniciar sesión</h3>
-      <input id="logUser" aria-label="Usuario" type="text" placeholder="usuario" autocomplete="username" spellcheck="false">
-      <input id="logPass" aria-label="Contraseña" type="password" placeholder="contraseña" autocomplete="current-password">
-      <button class="primary" type="submit">Entrar</button>
+    <form id="loginForm" class="cw-login" hidden>
+      <h2>Iniciar sesión</h2>
+      <label class="cw-field">Usuario
+        <input id="logUser" type="text" autocomplete="username" spellcheck="false">
+      </label>
+      <label class="cw-field">Contraseña
+        <input id="logPass" type="password" autocomplete="current-password">
+      </label>
       <p class="autherr" id="loginErr" role="alert" hidden></p>
+      <button class="cw-btn cw-btn--primary cw-btn--block" type="submit">Entrar</button>
     </form>
 
-    <form id="setupForm" class="authform" hidden>
-      <h3>Crear administrador</h3>
+    <form id="setupForm" class="cw-login" hidden>
+      <h2>Crear administrador</h2>
       <p class="hint">Primer arranque: define la cuenta de administrador.</p>
-      <input id="setUser" aria-label="Usuario administrador" type="text" placeholder="usuario admin" autocomplete="username" spellcheck="false">
-      <input id="setPass" aria-label="Contraseña" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
-      <button class="primary" type="submit">Crear y entrar</button>
+      <label class="cw-field">Usuario administrador
+        <input id="setUser" type="text" autocomplete="username" spellcheck="false">
+      </label>
+      <label class="cw-field">Contraseña (mínimo 4 caracteres)
+        <input id="setPass" type="password" autocomplete="new-password">
+      </label>
       <p class="autherr" id="setupErr" role="alert" hidden></p>
+      <button class="cw-btn cw-btn--primary cw-btn--block" type="submit">Crear y entrar</button>
     </form>
   </div>
 </div>
@@ -566,8 +574,8 @@
 
 <!-- La IA de respaldo del navegador (tf.min.js + coco-ssd.min.js, locales y offline)
      se carga bajo demanda desde app.js (loadTensorflow), no aquí. -->
-<script src="/static/icons.js?v=1"></script>
-<script src="/static/ui.js?v=3"></script>
+<script src="/static/icons.js?v=3"></script>
+<script src="/static/ui.js?v=5"></script>
 <script src="/static/whep.js?v=2"></script>
 <script src="/static/dvr.js?v=9"></script>
 <script src="/static/app.js?v=97"></script>

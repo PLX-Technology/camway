@@ -51,6 +51,23 @@
         el.setAttribute("aria-labelledby", h.id);
       }
     }
+    upgradeCloseButtons(el);
+  }
+
+  // Marco de modales (rediseño): el botón «Cerrar» de la cabecera pasa a ser un
+  // botón de ícono (x) con aria-label. Solo se toca si el texto es exactamente
+  // «Cerrar» y no lleva ya un ícono; los ids y los oyentes del botón no cambian.
+  // «Cancelar» (editor de zona) no se toca: cancela, no cierra.
+  function upgradeCloseButtons(el) {
+    if (typeof icon !== "function") return;
+    el.querySelectorAll(".modalhead [data-modal-close], .modalhead [data-close]").forEach((btn) => {
+      if (btn.querySelector("svg") || btn.textContent.trim() !== "Cerrar") return;
+      btn.classList.remove("ghost", "small");
+      btn.classList.add("cw-ib");
+      btn.setAttribute("aria-label", "Cerrar");
+      btn.title = "Cerrar";
+      btn.innerHTML = icon("x", 18);
+    });
   }
 
   function closeButton(el) {
@@ -166,6 +183,48 @@
     (items[0] || top.el).focus({ preventScroll: true });
   });
 
+  // ---------------------------------------------------------------- cabecera
+  // app.js solo cambia la clase de los puntos de estado (dot on/off) y el texto
+  // de #userName; aquí se traduce a texto accesible y a la inicial del avatar.
+  [["dotApi", "Servidor"], ["dotMtx", "Vídeo"]].forEach(([id, base]) => {
+    const dot = document.getElementById(id);
+    if (!dot) return;
+    const sync = () => {
+      const state = dot.classList.contains("on") ? "en línea"
+        : dot.classList.contains("off") ? "sin conexión" : "comprobando";
+      dot.setAttribute("aria-label", `${base}: ${state}`);
+      dot.title = `${base}: ${state}`;
+    };
+    new MutationObserver(sync).observe(dot, { attributes: true, attributeFilter: ["class"] });
+    sync();
+  });
+  const userName = document.getElementById("userName");
+  const avatar = document.querySelector(".usericon");
+  if (userName && avatar) {
+    const syncUser = () => {
+      const name = userName.textContent.trim();
+      avatar.textContent = name ? Array.from(name)[0] : "";
+      const box = document.getElementById("userBox");
+      if (box) box.title = name ? `Sesión de ${name}` : "";
+    };
+    new MutationObserver(syncUser).observe(userName, { childList: true, characterData: true, subtree: true });
+    syncUser();
+  }
+
+  // ---------------------------------------------------------------- avisos (toast)
+  // app.js solo pone el texto y la clase `err`; un error se anuncia con
+  // prioridad (role=alert) y el resto con cortesía (role=status).
+  const toastEl = document.getElementById("toast");
+  if (toastEl) {
+    const syncToast = () => {
+      const err = toastEl.classList.contains("err");
+      toastEl.setAttribute("role", err ? "alert" : "status");
+      toastEl.setAttribute("aria-live", err ? "assertive" : "polite");
+    };
+    new MutationObserver(syncToast).observe(toastEl, { attributes: true, attributeFilter: ["class"] });
+    syncToast();
+  }
+
   // ---------------------------------------------------------------- pestañas
   // app.js cambia la clase `.active`; aquí se refleja en `aria-selected` y se
   // añade el teclado de un tablist (flechas, Inicio, Fin), sin tocar app.js.
@@ -219,12 +278,23 @@
             card.className = "modalcard uicard";
             card.noValidate = true;
 
+            const top = document.createElement("div");
+            top.className = "uitop";
             const msg = document.createElement(input ? "label" : "p");
             msg.className = "uimsg";
             msg.id = msgId;
             msg.textContent = String(message ?? "");
             if (input) msg.htmlFor = fieldId;
-            card.appendChild(msg);
+            // x de cierre (cancela); Escape y el clic en el fondo hacen lo mismo
+            const x = document.createElement("button");
+            x.type = "button";
+            x.className = "cw-ib";
+            x.setAttribute("aria-label", "Cerrar");
+            x.title = "Cerrar";
+            x.setAttribute("data-modal-close", "");
+            x.innerHTML = typeof icon === "function" ? icon("x", 18) : "×";
+            top.append(msg, x);
+            card.appendChild(top);
 
             let field = null;
             if (input) {
@@ -244,12 +314,11 @@
             foot.className = "uibtns";
             const cancel = document.createElement("button");
             cancel.type = "button";
-            cancel.className = "ghost";
+            cancel.className = "cw-btn";
             cancel.textContent = "Cancelar";
-            cancel.setAttribute("data-modal-close", "");
             const ok = document.createElement("button");
             ok.type = "submit";
-            ok.className = danger ? "primary danger" : "primary";
+            ok.className = danger ? "cw-btn cw-btn--danger" : "cw-btn cw-btn--primary";
             ok.textContent = okLabel || "Aceptar";
             // Confirmación: el foco inicial va a Aceptar salvo que sea destructiva,
             // donde cae en Cancelar para que un Enter accidental no borre nada.
@@ -270,7 +339,9 @@
               e.preventDefault();
               finish(input ? field.value : true);
             });
-            cancel.addEventListener("click", () => finish(input ? null : false));
+            const cancelAll = () => finish(input ? null : false);
+            cancel.addEventListener("click", cancelAll);
+            x.addEventListener("click", cancelAll);
             // Clic en el fondo = cancelar (igual que los demás modales).
             root.addEventListener("mousedown", (e) => {
               if (e.target === root) finish(input ? null : false);
