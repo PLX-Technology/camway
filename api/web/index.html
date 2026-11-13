@@ -7,442 +7,642 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" href="/static/favicon-512.png">
-<link rel="stylesheet" href="/static/style.css?v=44">
+<link rel="stylesheet" href="/static/style.css?v=52">
+<link rel="stylesheet" href="/static/wall.css?v=2">
+<link rel="stylesheet" href="/static/gestion.css?v=3">
 </head>
 <body>
 
 <header class="topbar">
   <div class="brand">
     <img id="brandLogo" class="brandlogo" alt="CamWay" hidden>
-    <span class="mark" id="brandMark"></span>
+    <span class="mark" id="brandMark" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 28 28" focusable="false"><circle cx="14" cy="14" r="11" fill="none" stroke="#4C8DFF" stroke-width="3"/><circle cx="14" cy="14" r="4.5" fill="#4C8DFF"/><circle cx="22" cy="6" r="2.6" fill="#F04438"/></svg></span>
     <h1 id="brandTitle">CamWay</h1>
     <span class="sitebadge" id="siteBadge" hidden title="Taladro / sitio de esta instancia de CamWay"></span>
     <span class="tag" id="tagDevices">—</span>
   </div>
   <nav class="tabs" role="tablist" aria-label="Secciones">
-    <button class="tab" role="tab" aria-selected="false" aria-controls="view-inventario" data-view="inventario" data-admin>Inventario</button>
-    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-mosaico" data-view="mosaico">Mosaico</button>
-    <button class="tab" role="tab" aria-selected="false" aria-controls="view-grabaciones" data-view="grabaciones">Grabaciones</button>
-    <button class="tab" role="tab" aria-selected="false" aria-controls="view-ajustes" data-view="ajustes" data-admin>Ajustes</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-inventario" data-view="inventario" data-admin><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 10l5-3v10l-5-3z"/><rect x="2" y="6" width="13" height="12" rx="2"/></svg>Cámaras</button>
+    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-mosaico" data-view="mosaico"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Mosaico</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-grabaciones" data-view="grabaciones"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></svg>Grabaciones</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-ajustes" data-view="ajustes" data-admin><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>Ajustes</button>
   </nav>
   <div class="health">
-    <span class="dot" id="dotApi" title="API" role="img" aria-label="Estado de la API"></span> API
-    <span class="dot" id="dotMtx" title="MediaMTX" role="img" aria-label="Estado de MediaMTX"></span> MediaMTX
+    <span class="hstat"><span class="dot" id="dotApi" data-label="Servidor" title="Servidor (API del panel)" role="img" aria-label="Servidor"></span><span class="hlabel">Servidor</span></span>
+    <span class="hstat"><span class="dot" id="dotMtx" data-label="Vídeo" title="Vídeo (MediaMTX)" role="img" aria-label="Vídeo"></span><span class="hlabel">Vídeo</span></span>
     <span class="userbox" id="userBox" hidden>
-      <span class="usericon" aria-hidden="true">◍</span><span id="userName"></span>
-      <button id="btnLogout" class="ghost small" title="Cerrar sesión" aria-label="Cerrar sesión">Salir</button>
+      <span class="usericon" aria-hidden="true"></span><span id="userName"></span>
+      <button id="btnLogout" class="cw-btn cw-btn--sm" title="Cerrar sesión" aria-label="Cerrar sesión"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span class="btnlabel">Salir</span></button>
     </span>
   </div>
 </header>
 
-<!-- ------------------------------------------------ INVENTARIO -->
+<!-- ------------------------------------------------ CÁMARAS (inventario) -->
 <main id="view-inventario" class="view">
+  <div class="gx-page">
 
-  <section class="scanbar">
-    <div class="field grow">
-      <label for="cidr">Segmento a escanear</label>
-      <input id="cidr" type="text" placeholder="172.16.0.0/24" spellcheck="false">
-      <small>CIDR (<code>172.16.0.0/24</code>) o rango (<code>172.16.0.1-254</code>). Tope 8192 direcciones.</small>
-    </div>
-    <div class="field narrow">
-      <label for="channels">Canales DVR</label>
-      <input id="channels" type="number" min="1" max="64" value="8">
-      <small>Cuántos canales tantear</small>
-    </div>
-    <div class="field actions">
-      <button id="btnScan" class="primary">Escanear</button>
-      <button id="btnOnvifScan" class="ghost" title="Descubre cámaras por ONVIF en :8080/:80 y obtiene su ruta RTSP exacta">Descubrir ONVIF</button>
-      <button id="btnStop" class="ghost" disabled>Detener</button>
-      <button id="btnClearAll" class="ghost danger" title="Borra TODO el inventario para escanear limpio (no toca grabaciones)">Borrar todos</button>
-    </div>
-  </section>
-
-  <section class="progress" id="progressBox" hidden>
-    <div class="bar"><div class="fill" id="progFill"></div></div>
-    <div class="progmeta">
-      <span id="progStage">—</span>
-      <span id="progCount"></span>
-    </div>
-  </section>
-
-  <section class="single">
-    <details>
-      <summary>Probar un equipo suelto</summary>
-      <div class="singlerow">
-        <input id="oneHost" aria-label="Dirección del equipo" type="text" placeholder="172.16.0.139" spellcheck="false">
-        <input id="onePort" aria-label="Puerto RTSP" type="number" value="554" min="1" max="65535">
-        <input id="oneUser" aria-label="Usuario del equipo" type="text" placeholder="usuario (ej. admin)" spellcheck="false" autocomplete="off">
-        <input id="onePass" aria-label="Clave del equipo" type="password" placeholder="clave" autocomplete="new-password">
-        <button id="btnProbe" class="ghost">Interrogar</button>
-        <button id="btnOnvif" class="ghost">Descubrir por ONVIF</button>
+    <div class="gx-head">
+      <div class="gx-titlebox">
+        <h1 class="gx-h1">Cámaras</h1>
+        <p class="gx-sub" id="scanSummary">Todavía no hay equipos. Lanza un escaneo del segmento.</p>
       </div>
-      <p class="hint" id="onvifHint"></p>
-    </details>
-  </section>
+      <form class="cm-scanform" id="scanForm" aria-label="Buscar cámaras en la red">
+        <label class="gx-field">Segmento
+          <input id="cidr" class="gx-in gx-mono cm-cidr" type="text" placeholder="172.16.0.0/24" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="gx-field">Canales DVR
+          <input id="channels" class="gx-in cm-channels" type="number" min="1" max="64" value="8">
+        </label>
+        <button id="btnScan" class="cw-btn cw-btn--primary" type="submit"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>Escanear</button>
+        <button id="btnOnvifScan" class="cw-btn" type="button" title="Descubre cámaras por ONVIF en :8080/:80 y obtiene su ruta RTSP exacta">Descubrir ONVIF</button>
+        <button id="btnManual" class="cw-btn" type="button" aria-expanded="false" aria-controls="manualBox">Agregar a mano</button>
+        <button id="btnStop" class="cw-btn" type="button" disabled>Detener</button>
+      </form>
+    </div>
 
-  <section id="deviceList" class="devices"></section>
-  <p class="empty" id="emptyDevices">Todavía no hay equipos. Lanza un escaneo del segmento.</p>
+    <section class="cm-progress" id="progressBox" aria-label="Progreso del escaneo" hidden>
+      <div class="cm-bar"><div class="cm-fill" id="progFill"></div></div>
+      <div class="cm-progmeta" role="status">
+        <span id="progStage">—</span>
+        <span id="progCount"></span>
+      </div>
+    </section>
+
+    <section class="cw-card cm-manual" id="manualBox" aria-label="Agregar un equipo a mano" hidden>
+      <div class="cm-manualrow">
+        <label class="gx-field cm-f-host">Dirección
+          <input id="oneHost" class="gx-in gx-mono" type="text" placeholder="172.16.0.139" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="gx-field cm-f-port">Puerto RTSP
+          <input id="onePort" class="gx-in" type="number" value="554" min="1" max="65535">
+        </label>
+        <label class="gx-field cm-f-user">Usuario
+          <input id="oneUser" class="gx-in" type="text" placeholder="ej. admin" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="gx-field cm-f-pass">Clave
+          <input id="onePass" class="gx-in" type="password" placeholder="clave" autocomplete="new-password">
+        </label>
+        <button id="btnProbe" class="cw-btn cw-btn--primary" type="button">Interrogar</button>
+        <button id="btnOnvif" class="cw-btn" type="button" title="Busca equipos ONVIF que respondan al multicast de esta red">Buscar por multicast</button>
+      </div>
+      <p class="gx-hint" id="onvifHint"></p>
+    </section>
+
+    <div class="cm-stats" role="group" aria-label="Filtrar por estado">
+      <button type="button" class="cm-stat" data-filter="all" aria-pressed="true"><span class="cm-statlabel"><span class="cw-dot cm-dot-all"></span>Equipos</span><span class="cm-statn" id="statAll">0</span></button>
+      <button type="button" class="cm-stat" data-filter="pub" aria-pressed="false"><span class="cm-statlabel"><span class="cw-dot cm-dot-pub"></span>Publicadas</span><span class="cm-statn" id="statPub">0</span></button>
+      <button type="button" class="cm-stat" data-filter="new" aria-pressed="false"><span class="cm-statlabel"><span class="cw-dot cm-dot-new"></span>Sin publicar</span><span class="cm-statn" id="statNew">0</span></button>
+      <button type="button" class="cm-stat" data-filter="auth" aria-pressed="false"><span class="cm-statlabel"><span class="cw-dot cm-dot-auth"></span>Piden clave</span><span class="cm-statn" id="statAuth">0</span></button>
+    </div>
+
+    <div class="cm-toolbar">
+      <div class="cm-search">
+        <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="devSearch" class="gx-in" type="search" aria-label="Buscar por nombre, IP o marca" placeholder="Buscar por nombre, IP o marca" autocomplete="off">
+      </div>
+      <span class="gx-muted" id="devShown" role="status"></span>
+      <div class="cm-toolbar-r">
+        <div class="cm-selbar" id="selBar" hidden>
+          <span id="selLabel">0 seleccionadas</span>
+          <button id="btnPubSel" class="cw-btn cw-btn--primary cw-btn--sm" type="button">Publicar seleccionadas</button>
+          <button id="btnClearSel" class="cw-btn cw-btn--sm" type="button">Quitar selección</button>
+        </div>
+        <button id="btnClearAll" class="cw-btn cw-btn--danger cw-btn--sm" type="button" title="Borra TODO el inventario para escanear limpio (no toca grabaciones)">Borrar todos</button>
+      </div>
+    </div>
+
+    <div class="cw-card cm-tablecard">
+      <div class="cm-scroll">
+        <div class="cm-table">
+          <div class="cm-head">
+            <label class="cm-c-check"><input type="checkbox" id="selAll" aria-label="Seleccionar todas las visibles"></label>
+            <span class="cm-c-thumb">Vista</span>
+            <span class="cm-c-name">Equipo</span>
+            <span class="cm-c-vendor">Marca</span>
+            <span class="cm-c-streams">Streams</span>
+            <span class="cm-c-state">Estado</span>
+            <span class="cm-c-act">Acciones</span>
+          </div>
+          <div id="deviceList" class="cm-list"></div>
+          <p class="gx-empty" id="emptyDevices">Todavía no hay equipos. Lanza un escaneo del segmento.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
 </main>
 
 <!-- ------------------------------------------------ MOSAICO -->
 <main id="view-mosaico" class="view active">
-  <section class="wallbar">
+  <section class="cw-wallbar" aria-label="Controles del mosaico">
     <span class="sitebadge wallsite" id="wallSite" hidden></span>
-    <div class="field narrow">
-      <label for="cols">Columnas</label>
-      <select id="cols">
-        <option value="auto">Automático</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
-        <option value="4">4</option>
-        <option value="5">5</option>
-        <option value="6">6</option>
-      </select>
+    <div class="cw-zonebar" id="zoneBar" role="group" aria-label="Zonas" hidden></div>
+    <div class="cw-wallbar__tools">
+      <div class="cw-seg" id="gridSeg" role="group" aria-label="Rejilla">
+        <button type="button" data-cols="auto" aria-pressed="true" title="Columnas según el número de cámaras">Auto</button>
+        <button type="button" data-cols="1" aria-pressed="false" title="Solo la cámara seleccionada">1</button>
+        <button type="button" data-cols="2" aria-pressed="false">2×2</button>
+        <button type="button" data-cols="3" aria-pressed="false">3×3</button>
+      </div>
+      <button id="btnWallToggle" class="cw-btn" type="button" aria-pressed="true" title="Pausar o reanudar el mosaico"><span class="cw-dot cw-dot--live"></span><span>En vivo</span></button>
+      <button id="btnDvr" class="cw-btn" type="button" title="Vista en cuadrícula tipo DVR"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>Vista DVR</span></button>
+      <button id="btnFit" class="cw-ib" type="button" aria-label="Pantalla completa" aria-pressed="false" title="Pantalla completa: ajusta todas las cámaras al monitor"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <div class="cw-menuwrap">
+        <button id="btnWallMore" class="cw-ib" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="wallMenu" aria-label="Más opciones: modo de mosaico, calidad, auto-vivo, recargar, nueva zona" title="Más opciones"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg></button>
+        <div id="wallMenu" class="cw-menu" role="menu" aria-label="Más opciones del mosaico" hidden>
+          <button id="btnMosaicMode" class="cw-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" title="Mosaico en vídeo en vivo (fluido, pocas cámaras) o en fotogramas (ligero, muchas cámaras)"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></svg><span class="cw-menu__lbl">Vídeo en vivo</span><span class="cw-menu__val"></span></button>
+          <button id="btnLight" class="cw-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" title="Para equipos lentos: menos fps y fotogramas más pequeños (solo este navegador)"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span class="cw-menu__lbl">Modo ligero</span><span class="cw-menu__val"></span></button>
+          <button id="btnAutoLive" class="cw-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" title="Sube a vídeo en vivo las cámaras con detección reciente, solo si hay recursos (este navegador)"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span class="cw-menu__lbl">Auto-vivo</span><span class="cw-menu__val"></span></button>
+          <button id="btnWallReload" class="cw-menu__item" type="button" role="menuitem"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg><span class="cw-menu__lbl">Recargar</span></button>
+          <button id="btnNewZone" class="cw-menu__item" type="button" role="menuitem"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg><span class="cw-menu__lbl">Nueva zona</span></button>
+        </div>
+      </div>
     </div>
-    <div class="field actions">
-      <button id="btnFit" class="ghost"><span aria-hidden="true">⛶</span> Ajustar a pantalla</button>
-      <button id="btnNewZone" class="ghost"><span aria-hidden="true">＋</span> Nueva zona</button>
-      <button id="btnWallReload" class="ghost">Recargar</button>
-      <button id="btnWallStart" class="primary">Reanudar</button>
-      <button id="btnWallStop" class="ghost">Pausar</button>
-      <button id="btnDvr" class="ghost" title="Vista en cuadrícula tipo DVR (2×2)"><span aria-hidden="true">▦</span> DVR</button>
-      <button id="btnMosaicMode" class="ghost" title="Mosaico en fotogramas (ligero, muchas cámaras) o en vídeo en vivo (fluido, pocas cámaras)"><span aria-hidden="true">🎞️</span> Mosaico</button>
-      <button id="btnLight" class="ghost" title="Para equipos lentos: menos fps y fotogramas más pequeños (solo este navegador)"><span aria-hidden="true">🐢</span> Modo ligero</button>
-      <button id="btnAutoLive" class="ghost" title="Sube a vídeo en vivo las cámaras con detección reciente, solo si hay recursos (este navegador)"><span aria-hidden="true">🎥</span> Auto-vivo</button>
-    </div>
-    <p class="hint" id="wallHint">Arrastra las cámaras para reordenarlas o moverlas entre zonas.</p>
   </section>
+  <p class="cw-hint" id="wallHint">Arrastra las cámaras para reordenarlas o moverlas entre zonas.</p>
   <section id="wall" class="wall"></section>
+  <footer class="cw-wallfoot" id="wallFoot" role="status" aria-label="Estado del mosaico">
+    <span id="wfTotal"></span>
+    <span class="cw-wf" data-wf="live" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="connecting" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="auth" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="offline" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wf" data-wf="paused" hidden><span class="cw-dot"></span><span class="cw-wf__txt"></span></span>
+    <span class="cw-wallfoot__info" id="wfInfo"></span>
+  </footer>
   <p class="empty" id="emptyWall">
     No hay streams publicados. Ve al inventario y pulsa <strong>Publicar</strong> en las cámaras que quieras ver.
   </p>
 </main>
 
-<!-- ------------------------------------------------ AJUSTES -->
 <!-- ------------------------------------------------ GRABACIONES -->
 <main id="view-grabaciones" class="view">
-  <section class="recbar">
-    <div class="field">
-      <label id="recCamLabel">Cámara</label>
-      <div class="thumbselect" id="recCamSel">
-        <button type="button" class="ts-trigger" id="recCamTrigger" aria-haspopup="true" aria-labelledby="recCamLabel recCamName">
-          <img class="ts-thumb" id="recCamThumb" alt="">
-          <span class="ts-name" id="recCamName">—</span>
-          <span class="ts-caret" aria-hidden="true">▾</span>
-        </button>
-        <div class="ts-menu" id="recCamMenu" hidden></div>
+  <div class="gx-page gr-layout">
+
+    <aside class="gr-cams" aria-label="Cámaras con grabaciones">
+      <div class="gr-cams-title">Cámaras</div>
+      <div id="recCamList" class="gr-camlist"></div>
+    </aside>
+
+    <div class="gr-main">
+      <div class="gr-head">
+        <h1 class="gx-h1 gr-title" id="recCamName">Grabaciones</h1>
+        <div class="gr-daybar">
+          <div class="cw-seg" role="group" aria-label="Día" id="recDays">
+            <button type="button" data-day="today" aria-pressed="true">Hoy</button>
+            <button type="button" data-day="yesterday" aria-pressed="false">Ayer</button>
+            <button type="button" data-day="custom" aria-pressed="false">Elegir fecha</button>
+          </div>
+          <input id="recDate" class="gx-in" type="date" aria-label="Fecha" hidden>
+          <a id="recDl" class="cw-btn" download hidden><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Descargar tramo</a>
+        </div>
       </div>
+      <p class="gx-sub gr-hint" id="recHint" role="status"></p>
+
+      <div class="gr-stage">
+        <video id="recStageVideo" controls playsinline preload="none"></video>
+        <div class="gr-stage-empty" id="recStageEmpty">
+          <svg class="cw-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></svg>
+          <span id="recStageMsg">Elige un tramo en la línea de tiempo o en la lista para reproducirlo.</span>
+        </div>
+      </div>
+      <p class="gr-now" id="recStageInfo" role="status"></p>
+
+      <section class="cw-card gr-timeline" aria-label="Línea de tiempo del día">
+        <div class="gr-tl-head">
+          <span class="gr-tl-title" id="recDayLabel">Hoy</span>
+          <span class="gr-legend"><i class="gr-lg gr-lg-cont"></i>Grabación continua</span>
+          <span class="gr-legend"><i class="gr-lg gr-lg-ev"></i>Evento</span>
+        </div>
+        <div class="gr-track" id="recTrack" role="group" aria-label="Tramos grabados del día"></div>
+        <div class="gr-axis" aria-hidden="true">
+          <span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span class="gr-axis-r">24:00</span>
+        </div>
+        <p class="gx-hint" id="recTlNote"></p>
+      </section>
+
+      <section class="gr-block" id="recEvBox" hidden>
+        <div class="gr-sechead"><h2>Eventos</h2><span class="gx-muted" id="recEvCount"></span></div>
+        <div class="gr-grid" id="recEvGrid"></div>
+      </section>
+
+      <section class="gr-block">
+        <div class="gr-sechead"><h2 id="recContTitle">Grabación continua</h2><span class="gx-muted" id="recContCount"></span></div>
+        <div class="gr-grid" id="recGrid"></div>
+        <p class="gx-empty" id="recEmpty" hidden></p>
+      </section>
     </div>
-    <div class="field">
-      <label for="recDate">Fecha</label>
-      <input id="recDate" type="date">
-    </div>
-    <button id="recLoad" class="primary">Ver grabaciones</button>
-    <span class="hint" id="recHint"></span>
-  </section>
-  <section class="recgrid" id="recGrid"></section>
+  </div>
 </main>
 
-<!-- Reproductor de grabación -->
+<!-- Reproductor rápido (se abre desde «Grabación local» de una cámara del mosaico) -->
 <div id="recPlayer" class="modal" role="dialog" aria-modal="true" aria-labelledby="recPlayTitle" hidden>
   <div class="modalcard recplayercard">
     <div class="modalhead">
       <h3 id="recPlayTitle">Grabación</h3>
-      <button class="ghost small" id="recPlayClose" data-modal-close>Cerrar</button>
+      <button class="cw-btn cw-btn--sm" type="button" id="recPlayClose" data-modal-close>Cerrar</button>
     </div>
     <video id="recVideo" controls autoplay playsinline></video>
     <div class="aifoot">
-      <span class="hint" id="recPlayInfo"></span>
-      <a id="recDownload" class="ghost" download>Descargar MP4</a>
+      <span class="gx-hint" id="recPlayInfo"></span>
+      <a id="recDownload" class="cw-btn cw-btn--sm" download>Descargar MP4</a>
     </div>
   </div>
 </div>
 
+<!-- ------------------------------------------------ AJUSTES -->
 <main id="view-ajustes" class="view">
-  <!-- Resumen de salud del equipo (CPU, RAM, disco, temperaturas) leído de Netdata -->
-  <section class="panel" id="panelSalud" data-admin>
-    <h2><span aria-hidden="true">🩺</span> Salud del equipo</h2>
-    <p class="hint" id="hsSummary">Leyendo…</p>
-    <div class="hsgrid" id="hsGrid"></div>
-    <div class="hstemps" id="hsTemps"></div>
-    <table class="hscont" id="hsCont" hidden>
-      <thead><tr><th>Contenedor</th><th>CPU</th><th>Memoria</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="hint"><a id="hsLink" href="#" target="_blank" rel="noopener">Abrir Netdata (detalle e históricos)</a></p>
-  </section>
+  <div class="gx-page aj-layout">
 
-  <section class="panel" id="panelSite">
-    <h2><span aria-hidden="true">🏷️</span> Identificación de esta instancia</h2>
-    <p class="hint">Nombre del <strong>taladro o sitio</strong> donde corre este CamWay. Se muestra
-      en el encabezado, el mosaico, la vista DVR, la pantalla de login y la pestaña
-      del navegador, y sale en cada alerta de WhatsApp/correo para saber de dónde viene.</p>
-    <div class="userform">
-      <input id="siteName" aria-label="Nombre del taladro o sitio" type="text" maxlength="60" placeholder="ej. Taladro PDV-108 · Pozo JA20-14" autocomplete="off">
-      <button id="btnSiteSave" class="primary">Guardar</button>
-    </div>
-  </section>
+    <nav class="aj-side" id="ajSide" aria-label="Secciones de ajustes">
+      <button type="button" class="aj-sidebtn" data-aj-go="general" data-admin aria-current="page"><span class="aj-mark" aria-hidden="true"></span>General</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="alertas" aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Alertas</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="usuarios" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Usuarios</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="video" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Vídeo y grabación</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="red" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Red y escaneo</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="kiosco" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Equipo de guardia</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="salud" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Salud del equipo</button>
+    </nav>
 
-  <!-- Destinatarios de los avisos con foto por WhatsApp. Lo gestiona el admin o
-       el jefe de seguridad (rol "seguridad"). -->
-  <section class="panel" id="panelAlertas" hidden>
-    <h2><span aria-hidden="true">📲</span> Destinatarios de alertas (WhatsApp)</h2>
-    <p class="hint">Cuando una cámara detecta una alarma (persona sin casco, fuego…)
-      se envía una <strong>foto del momento</strong> a estos números. Usa el número
-      con código de país. Cada cámara decide qué avisar en su botón <strong>IA</strong>
-      (“Avisar con foto por WhatsApp”).</p>
-    <!-- Dispositivo que ENVÍA los avisos (solo admin): estado, desvincular, vincular otro -->
-    <div class="wacard" id="waCard" hidden>
-      <div class="warow"><span class="dot" id="waDot"></span><strong id="waTitle">WhatsApp</strong></div>
-      <p class="hint" id="waDetail"></p>
-      <div class="warow">
-        <button id="waLink" class="primary" type="button">Vincular dispositivo</button>
-        <button id="waUnlink" class="ghost" type="button">Desvincular</button>
-      </div>
-    </div>
-    <p class="hint" id="alStatus"></p>
-    <div class="userform">
-      <input id="alName" aria-label="Nombre del destinatario" type="text" placeholder="nombre (ej. Jefe de seguridad)" maxlength="40" autocomplete="off">
-      <input id="alPhone" aria-label="Número de teléfono" type="tel" placeholder="+58 414 1234567" autocomplete="off" inputmode="tel">
-      <button id="alAdd" class="primary">Agregar número</button>
-    </div>
-    <ul id="alList" class="userlist"></ul>
-    <h3 class="subhead">Últimos avisos</h3>
-    <ul id="alLog" class="userlist"></ul>
-  </section>
+    <div class="aj-content">
 
-  <section class="panel">
-    <h2>Usuarios y perfiles</h2>
-    <p class="hint">El <strong>administrador</strong> ve y gestiona todo. Un
-      <strong>viewer</strong> solo ve las cámaras que le asignes (y configura la
-      IA de esas cámaras). Cada usuario tiene su propia configuración de IA.</p>
-    <div class="userform">
-      <input id="uName" aria-label="Nombre de usuario" type="text" placeholder="usuario" spellcheck="false" autocomplete="off">
-      <input id="uPass" aria-label="Contraseña" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
-      <select id="uRole" aria-label="Rol">
-        <option value="viewer">viewer</option>
-        <option value="seguridad">seguridad (jefe de seguridad)</option>
-        <option value="admin">admin</option>
-      </select>
-      <button id="btnAddUser" class="primary">Crear usuario</button>
-    </div>
-    <p class="hint">Tras crear un viewer, pulsa <strong>Cámaras</strong> en su
-      fila para elegir qué cámaras puede ver.</p>
-    <ul id="userList" class="userlist"></ul>
-  </section>
+      <!-- General -->
+      <section class="aj-section" id="aj-general" data-aj="general" data-admin>
+        <h1 class="gx-h1">General</h1>
+        <div class="cw-card aj-card" id="panelSite">
+          <label class="gx-field">Nombre del sitio
+            <input id="siteName" class="gx-in" type="text" maxlength="60" placeholder="ej. Taladro PDV-108 · Pozo JA20-14" autocomplete="off">
+            <span class="gx-hint">Aparece en el encabezado, el mosaico, la vista DVR, el inicio de sesión y cada alerta.</span>
+          </label>
+          <div class="aj-logorow">
+            <div class="aj-logobox">
+              <img id="logoPreview" class="aj-logoimg" alt="Logo del sitio" hidden>
+              <span id="logoNone">Sin logo</span>
+            </div>
+            <label class="cw-btn aj-filebtn">Subir logo
+              <input type="file" id="logoFile" accept="image/*" class="sr-only">
+            </label>
+            <button id="btnLogoClear" class="cw-btn" type="button">Quitar</button>
+            <span class="gx-hint" id="logoHint">Sale en el encabezado de «Ajustar a pantalla». PNG o SVG, fondo transparente.</span>
+          </div>
+          <div><button id="btnSiteSave" class="cw-btn cw-btn--primary" type="button">Guardar nombre</button></div>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Equipo cliente / kiosco</h2>
-    <p class="hint">Comandos para abrir CamWay en <strong>pantalla completa</strong> al
-      arrancar la máquina (p. ej. la del guardia). Copia el que corresponda a su
-      navegador y pégalo en un acceso directo o terminal de esa máquina; para que
-      arranque solo, ponlo en <code>shell:startup</code>. Salir del kiosco: Alt+F4.</p>
-    <div class="kioskrow">
-      <label>Dirección de CamWay</label>
-      <div class="copyfield"><code id="kioskUrl"></code><button class="ghost small" data-copy="#kioskUrl">Copiar</button></div>
-    </div>
-    <div class="kioskrow">
-      <label>Chrome (kiosco)</label>
-      <div class="copyfield"><code id="kioskChrome"></code><button class="ghost small" data-copy="#kioskChrome">Copiar</button></div>
-    </div>
-    <div class="kioskrow">
-      <label>Edge (kiosco)</label>
-      <div class="copyfield"><code id="kioskEdge"></code><button class="ghost small" data-copy="#kioskEdge">Copiar</button></div>
-    </div>
-    <p class="hint">La sesión queda guardada ~30 días: inicia sesión una vez en esa
-      máquina y no volverá a pedir login tras reiniciar (no borrar cookies al cerrar).</p>
-  </section>
+      <!-- Alertas (admin y seguridad) -->
+      <section class="aj-section" id="aj-alertas" data-aj="alertas" hidden>
+        <h1 class="gx-h1">Alertas por WhatsApp</h1>
+        <p class="gx-sub">Cuando una cámara detecta una alarma, se envía una foto a estos números. Cada cámara elige qué avisar en su botón IA.</p>
+        <div id="panelAlertas" class="aj-stack" hidden>
+          <div class="cw-card aj-wa" id="waCard" hidden>
+            <span class="cw-dot aj-dot" id="waDot"></span>
+            <div class="aj-wa-text">
+              <div class="aj-wa-title" id="waTitle">WhatsApp</div>
+              <div class="gx-hint" id="waDetail"></div>
+            </div>
+            <button id="waLink" class="cw-btn" type="button">Vincular dispositivo</button>
+            <button id="waUnlink" class="cw-btn" type="button">Desvincular</button>
+          </div>
+          <div class="cw-card aj-card">
+            <div class="aj-cardtitle">Destinatarios</div>
+            <p class="gx-hint aj-status" id="alStatus" role="status"></p>
+            <div class="aj-formrow">
+              <label class="gx-field aj-grow">Nombre
+                <input id="alName" class="gx-in" type="text" placeholder="ej. Jefe de seguridad" maxlength="40" autocomplete="off">
+              </label>
+              <label class="gx-field aj-grow">Número con código de país
+                <input id="alPhone" class="gx-in" type="tel" placeholder="+58 414 1234567" autocomplete="off" inputmode="tel">
+              </label>
+              <button id="alAdd" class="cw-btn cw-btn--primary" type="button">Agregar</button>
+            </div>
+            <ul id="alList" class="aj-list"></ul>
+          </div>
+          <div class="cw-card aj-card">
+            <div class="aj-cardtitle">Últimos avisos</div>
+            <ul id="alLog" class="aj-list"></ul>
+          </div>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Logo</h2>
-    <p class="hint">Aparece en el encabezado del modo «Ajustar a pantalla» (video wall).</p>
-    <div class="logorow">
-      <img id="logoPreview" class="logoprev" alt="logo" hidden>
-      <label class="filebtn">Elegir imagen
-        <input type="file" id="logoFile" accept="image/*" class="sr-only">
-      </label>
-      <button id="btnLogoClear" class="ghost">Quitar</button>
-      <span class="hint" id="logoHint"></span>
-    </div>
-  </section>
+      <!-- Usuarios -->
+      <section class="aj-section" id="aj-usuarios" data-aj="usuarios" data-admin hidden>
+        <h1 class="gx-h1">Usuarios</h1>
+        <p class="gx-sub">Administrador: todo. Vigilante: solo las cámaras que le asignes. Seguridad: las alertas.</p>
+        <div class="cw-card aj-tablecard">
+          <div class="aj-uhead"><span>Usuario</span><span>Rol</span><span>Cámaras</span><span class="aj-r">Acciones</span></div>
+          <ul id="userList" class="aj-ulist"></ul>
+        </div>
+        <div class="cw-card aj-card">
+          <div class="aj-cardtitle">Crear usuario</div>
+          <div class="aj-formrow">
+            <label class="gx-field aj-grow">Usuario
+              <input id="uName" class="gx-in" type="text" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="gx-field aj-grow">Contraseña
+              <input id="uPass" class="gx-in" type="password" placeholder="4 caracteres o más" autocomplete="new-password">
+            </label>
+            <label class="gx-field aj-grow">Rol
+              <select id="uRole" class="gx-in">
+                <option value="viewer">Vigilante (solo sus cámaras)</option>
+                <option value="seguridad">Seguridad (alertas)</option>
+                <option value="admin">Administrador</option>
+              </select>
+            </label>
+            <button id="btnAddUser" class="cw-btn cw-btn--primary" type="button">Crear</button>
+          </div>
+          <p class="gx-hint">Tras crear un vigilante, pulsa «Cámaras» en su fila para elegir qué ve.</p>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Calidad de vídeo y grabación</h2>
-    <p class="hint">Afecta el vídeo en vivo al maximizar y lo que se graba. Un
-      bitrate más bajo = menos nitidez pero MÁS días de grabación continua.
-      Aplica a las cámaras que se transcodifican (HEVC/MJPEG/3K).</p>
-    <div class="settingsgrid">
-      <label>Resolución máxima
-        <select id="encRes">
-          <option value="854x480">480p (ligero)</option>
-          <option value="1280x720">720p</option>
-          <option value="1920x1080">1080p</option>
-          <option value="2560x1440">1440p</option>
-        </select>
-      </label>
-      <label>Cuadros por segundo
-        <input id="encFps" type="number" min="1" max="30">
-      </label>
-      <label>Bitrate por cámara
-        <select id="encBitrate">
-          <option value="">Automático (calidad fija, tamaño variable)</option>
-          <option value="500k">0,5 Mbps</option>
-          <option value="800k">0,8 Mbps</option>
-          <option value="1000k">1 Mbps</option>
-          <option value="1500k">1,5 Mbps</option>
-          <option value="2000k">2 Mbps</option>
-          <option value="4000k">4 Mbps</option>
-        </select>
-      </label>
-    </div>
-    <p class="hint" id="encEstimate"></p>
-    <button id="btnSaveEnc" class="primary">Guardar y aplicar</button>
-    <p class="hint" id="encHint"></p>
-  </section>
+      <!-- Vídeo y grabación -->
+      <section class="aj-section" id="aj-video" data-aj="video" data-admin hidden>
+        <h1 class="gx-h1">Vídeo y grabación</h1>
+        <p class="gx-sub">Afecta al vídeo en vivo al ampliar y a lo que se graba. Menos bitrate = menos nitidez y más días de grabación. Se aplica a las cámaras que se transcodifican (HEVC, MJPEG, 3K).</p>
+        <div class="cw-card aj-card">
+          <div class="aj-grid2">
+            <label class="gx-field">Resolución máxima
+              <select id="encRes" class="gx-in">
+                <option value="854x480">480p (ligero)</option>
+                <option value="1280x720">720p</option>
+                <option value="1920x1080">1080p</option>
+                <option value="2560x1440">1440p</option>
+              </select>
+            </label>
+            <label class="gx-field">Cuadros por segundo
+              <input id="encFps" class="gx-in" type="number" min="1" max="30">
+            </label>
+            <label class="gx-field aj-span2">Bitrate por cámara
+              <select id="encBitrate" class="gx-in">
+                <option value="">Automático (calidad fija, tamaño variable)</option>
+                <option value="500k">0,5 Mbps</option>
+                <option value="800k">0,8 Mbps</option>
+                <option value="1000k">1 Mbps</option>
+                <option value="1500k">1,5 Mbps</option>
+                <option value="2000k">2 Mbps</option>
+                <option value="4000k">4 Mbps</option>
+              </select>
+            </label>
+          </div>
+          <p class="gx-hint" id="encEstimate"></p>
+          <div><button id="btnSaveEnc" class="cw-btn cw-btn--primary" type="button">Guardar y aplicar</button></div>
+          <p class="gx-hint" id="encHint" role="status"></p>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Barrido</h2>
-    <div class="settingsgrid">
-      <label>Puertos RTSP
-        <input id="setPorts" type="text" placeholder="554, 8554, 10554">
-      </label>
-      <label>Concurrencia
-        <input id="setConc" type="number" min="10" max="1000">
-      </label>
-      <label>Espera de conexión (s)
-        <input id="setTimeout" type="number" min="0.2" max="10" step="0.1">
-      </label>
+      <!-- Red y escaneo -->
+      <section class="aj-section" id="aj-red" data-aj="red" data-admin hidden>
+        <h1 class="gx-h1">Red y escaneo</h1>
+        <div class="cw-card aj-card">
+          <div class="aj-grid2">
+            <label class="gx-field">Segmento por defecto
+              <input id="setCidr" class="gx-in gx-mono" type="text" placeholder="172.16.0.0/24" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="gx-field">Puertos RTSP
+              <input id="setPorts" class="gx-in gx-mono" type="text" placeholder="554, 8554, 10554">
+            </label>
+            <label class="gx-field">Equipos a la vez
+              <input id="setConc" class="gx-in" type="number" min="10" max="1000">
+            </label>
+            <label class="gx-field">Tiempo de espera por equipo (s)
+              <input id="setTimeout" class="gx-in" type="number" min="0.2" max="10" step="0.1">
+            </label>
+          </div>
+          <div><button id="btnSaveSettings" class="cw-btn cw-btn--primary" type="button">Guardar</button></div>
+          <p class="gx-hint" id="settingsHint" role="status"></p>
+        </div>
+      </section>
+
+      <!-- Equipo de guardia (kiosco) -->
+      <section class="aj-section" id="aj-kiosco" data-aj="kiosco" data-admin hidden>
+        <h1 class="gx-h1">Equipo de guardia (kiosco)</h1>
+        <p class="gx-sub">Abre CamWay a pantalla completa al encender la PC del guardia. Copia el comando y ponlo en <code>shell:startup</code>. Para salir del kiosco: Alt+F4.</p>
+        <div class="cw-card aj-card">
+          <div class="aj-copy">
+            <div class="aj-copylabel">Dirección de CamWay</div>
+            <div class="aj-copyrow"><code class="aj-code" id="kioskUrl"></code><button type="button" class="cw-btn" data-copy="#kioskUrl">Copiar</button></div>
+          </div>
+          <div class="aj-copy">
+            <div class="aj-copylabel">Chrome en modo kiosco</div>
+            <div class="aj-copyrow"><code class="aj-code" id="kioskChrome"></code><button type="button" class="cw-btn" data-copy="#kioskChrome">Copiar</button></div>
+          </div>
+          <div class="aj-copy">
+            <div class="aj-copylabel">Edge en modo kiosco</div>
+            <div class="aj-copyrow"><code class="aj-code" id="kioskEdge"></code><button type="button" class="cw-btn" data-copy="#kioskEdge">Copiar</button></div>
+          </div>
+          <p class="gx-hint">La sesión dura ~30 días: inicia sesión una vez en esa PC y no volverá a pedirla al reiniciar (no borres las cookies al cerrar).</p>
+        </div>
+      </section>
+
+      <!-- Salud del equipo -->
+      <section class="aj-section" id="aj-salud" data-aj="salud" data-admin hidden>
+        <h1 class="gx-h1">Salud del equipo</h1>
+        <div id="panelSalud" class="aj-stack">
+          <div class="aj-basics" id="hsBasics"></div>
+          <p class="aj-note" id="hsSummary" role="status">Leyendo…</p>
+          <div class="aj-tiles" id="hsGrid"></div>
+          <div class="aj-chips" id="hsTemps"></div>
+          <div class="cw-card aj-tablecard" id="hsContWrap" hidden>
+            <table class="aj-table" id="hsCont" hidden>
+              <thead><tr><th>Contenedor</th><th>CPU</th><th>Memoria</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="gx-hint"><a id="hsLink" href="#" target="_blank" rel="noopener">Abrir Netdata (detalle e históricos)</a></p>
+        </div>
+      </section>
+
     </div>
-    <button id="btnSaveSettings" class="primary">Guardar</button>
-    <p class="hint" id="settingsHint"></p>
-  </section>
+  </div>
 </main>
 
 <!-- Vincular el WhatsApp que envía los avisos (QR o código) -->
 <div id="waModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="waModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3 id="waModalTitle">Vincular WhatsApp que enviará las alertas</h3>
-      <button class="ghost small" id="waClose" data-modal-close>Cerrar</button>
+      <h3 id="waModalTitle">Vincular WhatsApp para las alertas</h3>
+      <button class="cw-ib cw-ib--sm" id="waClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
-    <p class="hint">En el celular del número que enviará las alertas abre
-      <strong>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</strong>
-      y escanea el código. Se renueva solo cada ~20 s.</p>
-    <div class="waqr">
+    <p class="mo-intro">En el celular que enviará las alertas abre <strong>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</strong> y escanea el código. Se renueva solo cada ~20 s.</p>
+    <div class="mo-qr">
       <img id="waQr" alt="Código QR de WhatsApp" hidden>
-      <p class="hint" id="waQrMsg">Generando código…</p>
+      <p class="gx-hint" id="waQrMsg" role="status">Generando código…</p>
     </div>
-    <p class="hint mt-12">¿No puedes escanear? Vincula con el número de teléfono:</p>
-    <div class="userform">
-      <input id="waPhone" aria-label="Número del celular" type="tel" placeholder="número del celular, ej. +58 414 1234567" autocomplete="off">
-      <button id="waPair" class="ghost" type="button">Obtener código</button>
+    <div class="mo-section">
+      <div class="mo-sectitle">¿No puedes escanear? Vincula con el número</div>
+      <div class="mo-row">
+        <label class="gx-field mo-grow">Número del celular
+          <input id="waPhone" class="gx-in" type="tel" placeholder="+58 414 1234567" autocomplete="off">
+        </label>
+        <button id="waPair" class="cw-btn" type="button">Obtener código</button>
+      </div>
+      <p id="waCode" class="mo-code" hidden></p>
     </div>
-    <p id="waCode" class="wacode" hidden></p>
-    <div class="aifoot"><span class="hint" id="waState"></span></div>
+    <div class="mo-foot"><span class="gx-hint" id="waState" role="status"></span></div>
   </div>
 </div>
 
 <!-- Configuración de IA por cámara -->
-<div id="aiModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" hidden>
-  <div class="modalcard">
-    <div class="modalhead">
-      <h3 id="aiModalTitle">Comportamiento IA — <span id="aiCamName"></span></h3>
-      <button class="ghost small" id="aiClose" data-modal-close>Cerrar</button>
-    </div>
-    <p class="hint">La detección corre en el servidor (YOLO) cuando está disponible;
-      si no, en el navegador como respaldo. El sonido suena en este navegador.</p>
+<div id="aiModal" class="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" hidden>
+  <div class="modalcard ai-card">
 
-    <label class="aitoggle">
-      <input type="checkbox" id="aiEnabled"> Activar detección en esta cámara
-    </label>
-
-    <div class="aigrid">
-      <label>Qué detectar
-        <select id="aiTarget">
-          <option value="vehiculo">Vehículo (auto, camión, bus, moto)</option>
-          <option value="persona">Persona</option>
-          <option value="ambos">Vehículo o persona</option>
-          <option value="fuego">🔥 Fuego / Humo</option>
-          <option value="epp">⛑️ Persona sin casco (EPP)</option>
-        </select>
+    <header class="ai-head">
+      <svg class="cw-icon ai-headicon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l1.8 4.7 4.7 1.8-4.7 1.8L12 16l-1.8-4.7-4.7-1.8 4.7-1.8z"/></svg>
+      <div class="ai-headtext">
+        <h2 id="aiModalTitle">Detección con IA · <span id="aiCamName"></span></h2>
+        <div class="ai-camsub" id="aiCamSub"></div>
+      </div>
+      <label class="mo-switch ai-onwrap">
+        <input type="checkbox" id="aiEnabled" class="mo-sw" role="switch" aria-label="Vigilar esta cámara">
+        <span class="ai-onlabel" id="aiOnLabel">Apagada</span>
       </label>
-      <label>Al detectar
-        <select id="aiAction">
-          <option value="full">Pantalla completa + marco rojo parpadeante</option>
-          <option value="frame">Solo marco rojo parpadeante</option>
-          <option value="badge">Solo aviso en la esquina</option>
-        </select>
-      </label>
-      <label>Confianza mínima: <span id="aiScoreVal">40%</span>
-        <input type="range" id="aiScore" min="20" max="90" step="5" value="40">
-      </label>
-    </div>
+      <button class="cw-ib" id="aiClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </header>
 
-    <label class="aitoggle mt-12">
-      <input type="checkbox" id="aiSound"> Reproducir sonido de alarma al detectar
-    </label>
-
-    <div class="aizone">
-      <button class="ghost" id="aiZoneBtn">Definir zona de detección…</button>
-      <span class="hint" id="aiZoneState"></span>
-    </div>
-
-    <div class="aisched">
-      <label class="aitoggle"><input type="checkbox" id="aiSchedOn"> Solo en un horario</label>
-      <div id="aiSchedBody">
-        <div class="days" id="aiDays">
-          <button type="button" data-d="1" aria-label="Lunes">L</button>
-          <button type="button" data-d="2" aria-label="Martes">M</button>
-          <button type="button" data-d="3" aria-label="Miércoles">X</button>
-          <button type="button" data-d="4" aria-label="Jueves">J</button>
-          <button type="button" data-d="5" aria-label="Viernes">V</button>
-          <button type="button" data-d="6" aria-label="Sábado">S</button>
-          <button type="button" data-d="0" aria-label="Domingo">D</button>
-        </div>
-        <div class="timerow">
-          <label>Desde <input type="time" id="aiStart" value="21:00"></label>
-          <label>Hasta <input type="time" id="aiEnd" value="06:00"></label>
-        </div>
-        <p class="hint" id="aiSchedHint"></p>
+    <div class="ai-engine" id="aiEngine" data-engine="browser" role="status">
+      <span class="cw-dot ai-engine-dot" aria-hidden="true"></span>
+      <div class="ai-engine-text">
+        <strong id="aiEngineTitle">Comprobando el detector…</strong>
+        <span id="aiEngineText"></span>
       </div>
     </div>
 
-    <!-- Avisos FUERA de pantalla: foto por WhatsApp / correo (regla del servidor,
-         funciona aunque nadie tenga el DVR abierto). Solo admin. -->
-    <div class="aisched" id="aiAlertBox" hidden>
-      <label class="aitoggle"><input type="checkbox" id="alEnabled"> 📲 Avisar con foto por WhatsApp / correo</label>
-      <div id="alBody" class="mt-8">
-        <p class="hint" id="alChannels"></p>
-        <div class="aigrid">
-          <label class="aitoggle"><input type="checkbox" id="alHead"> ⛑️ Persona sin casco</label>
-          <label class="aitoggle"><input type="checkbox" id="alFire"> 🔥 Fuego / humo</label>
-          <label>Confirmar tras
-            <select id="alHits">
-              <option value="2">2 detecciones (más rápido)</option>
-              <option value="3">3 detecciones</option>
-              <option value="5">5 detecciones (menos falsos)</option>
-            </select>
-          </label>
-          <label>No repetir antes de
-            <select id="alCool">
-              <option value="60">1 minuto</option>
-              <option value="300">5 minutos</option>
-              <option value="900">15 minutos</option>
-              <option value="1800">30 minutos</option>
-            </select>
-          </label>
+    <div class="ai-body">
+
+      <aside class="ai-side">
+        <h3 class="ai-h">Dónde</h3>
+        <div class="ai-zonebox">
+          <img id="aiZoneImg" alt="Vista de la cámara con la zona de detección">
+          <svg id="aiZoneSvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" hidden><polygon id="aiZonePoly" points=""/></svg>
+          <span class="ai-zonetag" id="aiZoneTag">Toda la imagen</span>
         </div>
-        <div class="aizone">
-          <button class="ghost" id="alTest" type="button">Enviar prueba a los destinatarios</button>
-          <span class="hint" id="alState"></span>
+        <div class="ai-btnrow">
+          <button class="cw-btn" id="aiZoneBtn" type="button">Editar zona</button>
+          <button class="cw-btn" id="aiZoneAll" type="button">Toda la imagen</button>
         </div>
+        <p class="ai-note" id="aiZoneState"></p>
+
+        <h3 class="ai-h ai-h2">Cuándo</h3>
+        <div class="cw-seg" role="group" aria-label="Cuándo vigilar" id="aiWhen">
+          <button type="button" data-when="always" aria-pressed="true">Siempre</button>
+          <button type="button" data-when="sched" aria-pressed="false">En un horario</button>
+        </div>
+        <div id="aiSchedBody" class="ai-sched" hidden>
+          <div class="ai-days" id="aiDays" role="group" aria-label="Días armados">
+            <button type="button" data-d="1" aria-label="Lunes" aria-pressed="false">L</button>
+            <button type="button" data-d="2" aria-label="Martes" aria-pressed="false">M</button>
+            <button type="button" data-d="3" aria-label="Miércoles" aria-pressed="false">X</button>
+            <button type="button" data-d="4" aria-label="Jueves" aria-pressed="false">J</button>
+            <button type="button" data-d="5" aria-label="Viernes" aria-pressed="false">V</button>
+            <button type="button" data-d="6" aria-label="Sábado" aria-pressed="false">S</button>
+            <button type="button" data-d="0" aria-label="Domingo" aria-pressed="false">D</button>
+          </div>
+          <div class="ai-times">
+            <label class="gx-field">Desde <input type="time" id="aiStart" class="gx-in" value="21:00"></label>
+            <label class="gx-field">Hasta <input type="time" id="aiEnd" class="gx-in" value="06:00"></label>
+          </div>
+        </div>
+        <p class="ai-note" id="aiSchedHint"></p>
+      </aside>
+
+      <div class="ai-main">
+
+        <section class="ai-sec">
+          <h3 class="ai-h">Qué vigilar <span class="ai-hsub">· puedes elegir varias</span></h3>
+          <div class="ai-targets" id="aiTargets">
+            <label class="ai-target" data-t="persona">
+              <input type="checkbox" class="sr-only" data-target="persona">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Personas</span><span class="ai-thint">Alguien entra en la zona</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+            <label class="ai-target" data-t="vehiculo">
+              <input type="checkbox" class="sr-only" data-target="vehiculo">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Vehículos</span><span class="ai-thint">Auto, camión, bus o moto</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+            <label class="ai-target" data-t="epp">
+              <input type="checkbox" class="sr-only" data-target="epp">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Persona sin casco</span><span class="ai-thint">Cabeza descubierta (EPP)</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+            <label class="ai-target" data-t="fuego">
+              <input type="checkbox" class="sr-only" data-target="fuego">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Fuego o humo</span><span class="ai-thint">Llama o columna de humo</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+          </div>
+        </section>
+
+        <section class="ai-sec">
+          <h3 class="ai-h">Sensibilidad</h3>
+          <div class="ai-row">
+            <div class="cw-seg" role="group" aria-label="Sensibilidad" id="aiSens">
+              <button type="button" data-s="60" aria-pressed="false">Baja</button>
+              <button type="button" data-s="40" aria-pressed="true">Media</button>
+              <button type="button" data-s="25" aria-pressed="false">Alta</button>
+            </div>
+            <span class="ai-note" id="aiSensText"></span>
+          </div>
+        </section>
+
+        <section class="ai-sec">
+          <h3 class="ai-h">Al detectar, en pantalla</h3>
+          <div class="ai-row">
+            <div class="cw-seg" role="group" aria-label="Reacción en pantalla" id="aiActions">
+              <button type="button" data-a="full" aria-pressed="false">Pantalla completa</button>
+              <button type="button" data-a="frame" aria-pressed="false">Marco rojo</button>
+              <button type="button" data-a="badge" aria-pressed="false">Aviso discreto</button>
+            </div>
+            <label class="mo-switch ai-sound"><input type="checkbox" id="aiSound" class="mo-sw" role="switch"><span>Sonido de alarma</span></label>
+          </div>
+        </section>
+
+        <!-- Avisos fuera de pantalla: foto por WhatsApp / correo (regla del servidor, funciona
+             aunque nadie tenga el panel abierto). Solo admin y seguridad. -->
+        <section class="ai-sec ai-alert" id="aiAlertBox" hidden>
+          <label class="mo-switch ai-alerthead">
+            <input type="checkbox" id="alEnabled" class="mo-sw" role="switch">
+            <span class="ai-alerttext"><strong>Avisar con foto por WhatsApp o correo</strong><span class="ai-note">Aunque nadie esté mirando la pantalla.</span></span>
+          </label>
+          <div id="alBody" class="ai-alertbody">
+            <div class="ai-chips">
+              <span class="ai-chiplabel">Avisa de:</span>
+              <span id="alChips" class="ai-chiplist"></span>
+            </div>
+            <p class="ai-note" id="alChannels"></p>
+            <div class="ai-alertrow">
+              <label class="gx-field">Confirmar tras
+                <select id="alHits" class="gx-in">
+                  <option value="2">2 detecciones · más rápido</option>
+                  <option value="3">3 detecciones</option>
+                  <option value="5">5 detecciones · menos falsos</option>
+                </select>
+              </label>
+              <label class="gx-field">No repetir antes de
+                <select id="alCool" class="gx-in">
+                  <option value="60">1 minuto</option>
+                  <option value="300">5 minutos</option>
+                  <option value="900">15 minutos</option>
+                  <option value="1800">30 minutos</option>
+                </select>
+              </label>
+              <button class="cw-btn" id="alTest" type="button">Enviar prueba</button>
+            </div>
+            <p class="ai-note" id="alState" role="status"></p>
+            <p class="ai-warn" id="alNoRecip" hidden>
+              <svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>
+              <span>Todavía no hay destinatarios. <a href="#" id="alGoSettings">Agregar en Ajustes › Alertas</a></span>
+            </p>
+          </div>
+        </section>
+
       </div>
     </div>
 
-    <div class="aifoot">
-      <span class="hint" id="aiModelState"></span>
-      <button class="primary" id="aiSave">Guardar</button>
-    </div>
+    <footer class="ai-foot">
+      <span class="ai-footnote" id="aiModelState" role="status"></span>
+      <button class="cw-btn" id="aiCancel" type="button">Cancelar</button>
+      <button class="cw-btn cw-btn--primary" id="aiSave" type="button">Guardar</button>
+    </footer>
   </div>
 </div>
 
@@ -451,31 +651,24 @@
   <div class="modalcard">
     <div class="modalhead">
       <h3 id="osdModalTitle">OSD en la cámara — <span id="osdCamName"></span></h3>
-      <button class="ghost small" id="osdClose" data-modal-close>Cerrar</button>
+      <button class="cw-ib cw-ib--sm" id="osdClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
-    <p class="hint">Escribe el nombre y el sello de fecha/hora <strong>DENTRO de la cámara</strong>:
-      queda grabado en el propio video y en las grabaciones (lo ve cualquier reproductor).
-      Es un cambio <strong>permanente en el equipo</strong>. Funciona en HiLook/Hikvision
-      (ISAPI) y cámaras ONVIF como las HJT.</p>
-    <div class="aigrid">
-      <label>Nombre mostrado en el video
-        <input type="text" id="osdName" maxlength="32" placeholder="p.ej. TALADRO-1 PORTON">
-      </label>
+    <p class="mo-intro">Escribe el nombre y la fecha/hora <strong>dentro de la cámara</strong>: quedan grabados en el propio vídeo y en las grabaciones. Es un cambio <strong>permanente en el equipo</strong>. Funciona en HiLook/Hikvision (ISAPI) y cámaras ONVIF como las HJT.</p>
+    <label class="gx-field">Nombre mostrado en el vídeo
+      <input type="text" id="osdName" class="gx-in" maxlength="32" placeholder="p. ej. TALADRO-1 PORTÓN">
+    </label>
+    <div class="mo-checks mo-stack">
+      <label class="mo-check"><input type="checkbox" id="osdShowName" checked><span>Mostrar el nombre</span></label>
+      <label class="mo-check"><input type="checkbox" id="osdShowTime" checked><span>Mostrar fecha y hora</span></label>
+      <label class="mo-check"><input type="checkbox" id="osdSetTime"><span>Poner la cámara en hora</span></label>
     </div>
-    <label class="aitoggle"><input type="checkbox" id="osdShowName" checked> Mostrar el nombre</label>
-    <label class="aitoggle"><input type="checkbox" id="osdShowTime" checked> Mostrar fecha y hora</label>
-    <label class="aitoggle"><input type="checkbox" id="osdSetTime"> Poner la cámara en hora</label>
-    <div class="aigrid mt-6" id="osdNtpRow">
-      <label>Servidor NTP (sincronía permanente)
-        <input type="text" id="osdNtp" placeholder="p.ej. 172.16.10.83 o pool.ntp.org">
-      </label>
-    </div>
-    <p class="hint">Con servidor NTP la cámara se <strong>sincroniza sola</strong> contra él.
-      Vacío = se pone una sola vez con la hora del servidor. (NTP permanente: HiLook/ISAPI;
-      en ONVIF/HJT por ahora es una sola vez.)</p>
-    <div class="aifoot">
-      <span class="hint" id="osdState"></span>
-      <button class="primary" id="osdSave">Aplicar a la cámara</button>
+    <label class="gx-field" id="osdNtpRow">Servidor NTP (sincronía permanente)
+      <input type="text" id="osdNtp" class="gx-in" placeholder="p. ej. 172.16.10.83 o pool.ntp.org">
+    </label>
+    <p class="gx-hint">Con servidor NTP la cámara se sincroniza sola. Vacío = se pone una vez con la hora del servidor. (NTP permanente: HiLook/ISAPI; en ONVIF/HJT por ahora es una sola vez.)</p>
+    <div class="mo-foot">
+      <span class="gx-hint" id="osdState" role="status"></span>
+      <button class="cw-btn cw-btn--primary" id="osdSave" type="button">Aplicar a la cámara</button>
     </div>
   </div>
 </div>
@@ -485,20 +678,22 @@
   <div class="modalcard zonecard">
     <div class="modalhead">
       <h3 id="zoneModalTitle">Zona de detección — <span id="zoneCamName"></span></h3>
-      <button class="ghost small" id="zoneNewWin" title="Editar en una ventana aparte, más grande">⤢ Ventana nueva</button>
-      <button class="ghost small" id="zoneCancel" data-modal-close>Cancelar</button>
+      <div class="zone-headbtns">
+        <button class="cw-btn cw-btn--sm" id="zoneNewWin" type="button" title="Editar en una ventana aparte, más grande"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg><span>Ventana nueva</span></button>
+        <button class="cw-ib" id="zoneCancel" type="button" data-modal-close title="Cancelar (Esc)" aria-label="Cancelar y volver"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
     </div>
-    <p class="hint">Mantén presionado y <strong>traza</strong> el área donde quieres detectar
+    <p class="cw-hint">Mantén presionado y <strong>traza</strong> el área donde quieres detectar
       (por ejemplo, solo el parking). Fuera de la zona se ignora. Sin zona, se
       detecta en toda la imagen.</p>
     <div class="zonewrap">
-      <canvas id="zoneCanvas"></canvas>
+      <canvas id="zoneCanvas" aria-label="Fotograma de la cámara donde se traza la zona"></canvas>
     </div>
     <div class="aifoot">
-      <span class="hint" id="zoneInfo">Sin zona.</span>
+      <span class="cw-hint" id="zoneInfo" role="status">Sin zona.</span>
       <div class="zonebtns">
-        <button class="ghost" id="zoneClear">Limpiar</button>
-        <button class="primary" id="zoneSave">Guardar zona</button>
+        <button class="cw-btn" id="zoneClear" type="button"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg><span>Limpiar</span></button>
+        <button class="cw-btn cw-btn--primary" id="zoneSave" type="button"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg><span>Guardar zona</span></button>
       </div>
     </div>
   </div>
@@ -506,56 +701,71 @@
 
 <!-- ------------------------------------------------ LOGIN / SETUP -->
 <div id="authOverlay" class="authoverlay" role="dialog" aria-modal="true" aria-label="Acceso a CamWay" hidden>
-  <div class="authcard">
+  <div class="authcard cw-card">
     <div class="authbrand">
       <img id="authLogo" class="authlogo" alt="" hidden>
-      <h1 id="authTitle">CamWay</h1>
+      <h1 id="authTitle"><span class="mark" aria-hidden="true"><svg width="32" height="32" viewBox="0 0 28 28" focusable="false"><circle cx="14" cy="14" r="11" fill="none" stroke="#4C8DFF" stroke-width="3"/><circle cx="14" cy="14" r="4.5" fill="#4C8DFF"/><circle cx="22" cy="6" r="2.6" fill="#F04438"/></svg></span>CamWay</h1>
       <div class="authsite" id="authSite" hidden></div>
     </div>
 
-    <form id="loginForm" class="authform" hidden>
-      <h3>Iniciar sesión</h3>
-      <input id="logUser" aria-label="Usuario" type="text" placeholder="usuario" autocomplete="username" spellcheck="false">
-      <input id="logPass" aria-label="Contraseña" type="password" placeholder="contraseña" autocomplete="current-password">
-      <button class="primary" type="submit">Entrar</button>
+    <form id="loginForm" class="cw-login" hidden>
+      <h2>Iniciar sesión</h2>
+      <label class="cw-field">Usuario
+        <input id="logUser" type="text" autocomplete="username" spellcheck="false">
+      </label>
+      <label class="cw-field">Contraseña
+        <input id="logPass" type="password" autocomplete="current-password">
+      </label>
       <p class="autherr" id="loginErr" role="alert" hidden></p>
+      <button class="cw-btn cw-btn--primary cw-btn--block" type="submit">Entrar</button>
     </form>
 
-    <form id="setupForm" class="authform" hidden>
-      <h3>Crear administrador</h3>
+    <form id="setupForm" class="cw-login" hidden>
+      <h2>Crear administrador</h2>
       <p class="hint">Primer arranque: define la cuenta de administrador.</p>
-      <input id="setUser" aria-label="Usuario administrador" type="text" placeholder="usuario admin" autocomplete="username" spellcheck="false">
-      <input id="setPass" aria-label="Contraseña" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
-      <button class="primary" type="submit">Crear y entrar</button>
+      <label class="cw-field">Usuario administrador
+        <input id="setUser" type="text" autocomplete="username" spellcheck="false">
+      </label>
+      <label class="cw-field">Contraseña (mínimo 4 caracteres)
+        <input id="setPass" type="password" autocomplete="new-password">
+      </label>
       <p class="autherr" id="setupErr" role="alert" hidden></p>
+      <button class="cw-btn cw-btn--primary cw-btn--block" type="submit">Crear y entrar</button>
     </form>
   </div>
 </div>
 
 <!-- ------------------------------------------------ VISTA DVR (cuadrícula limpia) -->
-<div id="dvrView" class="dvrview" hidden>
+<div id="dvrView" class="dvrview" role="region" aria-label="Vista DVR" hidden>
   <div class="dvr-bar">
+    <svg width="22" height="22" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" fill="none" stroke="#4C8DFF" stroke-width="3"/><circle cx="14" cy="14" r="4.5" fill="#4C8DFF"/><circle cx="22" cy="6" r="2.6" fill="#F04438"/></svg>
     <span class="dvr-title" id="dvrTitle"></span>
-    <select id="dvrLayout" class="dvr-sel" title="Cámaras por pantalla" aria-label="Cámaras por pantalla">
-      <option value="4" selected>2×2 (4)</option>
-      <option value="9">3×3 (9)</option>
-      <option value="16">4×4 (16)</option>
-      <option value="1">1 cámara</option>
-    </select>
-    <span class="dvr-pager" id="dvrPager">
-      <button id="dvrPrev" class="dvr-btn" title="Página anterior (←)" aria-label="Página anterior">◀</button>
-      <span id="dvrPageLbl" aria-live="polite">1/1</span>
-      <button id="dvrNext" class="dvr-btn" title="Página siguiente (→)" aria-label="Página siguiente">▶</button>
-    </span>
-    <span class="dvr-sp"></span>
-    <button id="dvrFull" class="dvr-btn" title="Pantalla completa" aria-label="Pantalla completa">⛶</button>
-    <button id="dvrClose" class="dvr-btn" title="Cerrar vista DVR (Esc)" aria-label="Cerrar vista DVR">✕</button>
+    <time class="dvr-clock" id="dvrClock"></time>
+    <div class="dvr-tools">
+      <span class="dvr-lbl" id="dvrSegLbl">Rejilla</span>
+      <div class="cw-seg" id="dvrSeg" role="group" aria-labelledby="dvrSegLbl">
+        <button type="button" data-layout="auto" aria-pressed="true" title="Rejilla según el número de cámaras">Auto</button>
+        <button type="button" data-layout="1" aria-pressed="false">1</button>
+        <button type="button" data-layout="4" aria-pressed="false">2×2</button>
+        <button type="button" data-layout="9" aria-pressed="false">3×3</button>
+        <button type="button" data-layout="16" aria-pressed="false">4×4</button>
+      </div>
+      <span class="dvr-pager" id="dvrPager">
+        <span id="dvrPageLbl" class="dvr-lbl" aria-live="polite"></span>
+        <button id="dvrPrev" class="cw-ib" type="button" title="Página anterior (←)" aria-label="Página anterior"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 18-6-6 6-6"/></svg></button>
+        <button id="dvrNext" class="cw-ib" type="button" title="Página siguiente (→)" aria-label="Página siguiente"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 18 6-6-6-6"/></svg></button>
+      </span>
+      <span class="dvr-count dvr-lbl" id="dvrCount"></span>
+      <button id="dvrFull" class="cw-ib" type="button" title="Pantalla completa" aria-label="Pantalla completa"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <button id="dvrClose" class="cw-ib" type="button" title="Cerrar vista DVR (Esc)" aria-label="Cerrar vista DVR"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
   </div>
   <div id="dvrGrid" class="dvr-grid"></div>
   <div id="dvrMax" class="dvr-max">
     <video id="dvrMaxVideo" autoplay playsinline muted></video>
     <div class="dvr-state" id="dvrMaxState"></div>
     <div class="dvr-name" id="dvrMaxName"></div>
+    <button id="dvrUnmax" class="cw-ib cw-ib--glass dvr-unmax" type="button" title="Volver a la cuadrícula (Esc)" aria-label="Volver a la cuadrícula"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg></button>
     <div class="dvr-hint">doble clic o Esc para volver</div>
   </div>
 </div>
@@ -564,9 +774,10 @@
 
 <!-- La IA de respaldo del navegador (tf.min.js + coco-ssd.min.js, locales y offline)
      se carga bajo demanda desde app.js (loadTensorflow), no aquí. -->
-<script src="/static/ui.js?v=3"></script>
+<script src="/static/icons.js?v=3"></script>
+<script src="/static/ui.js?v=7"></script>
 <script src="/static/whep.js?v=2"></script>
-<script src="/static/dvr.js?v=9"></script>
-<script src="/static/app.js?v=97"></script>
+<script src="/static/dvr.js?v=10"></script>
+<script src="/static/app.js?v=99"></script>
 </body>
 </html>

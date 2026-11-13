@@ -200,8 +200,13 @@ $$(".tab").forEach((tab) => {
     if (tab.dataset.view === "mosaico") enterWallView();
     if (tab.dataset.view === "grabaciones") loadRecDevices();
     if (tab.dataset.view === "ajustes") {
-      if (isAdmin()) { loadUsers(); fillKiosk(); loadEncoding(); loadHealth(); }
-      loadAlertPanel();
+      // Gestión: ajSelect(ajCurrent) carga la sección de Ajustes abierta; si esta
+      // rama aún no la tiene, se mantienen las cargas de siempre.
+      if (typeof ajSelect === "function") ajSelect(typeof ajCurrent !== "undefined" ? ajCurrent : undefined);
+      else {
+        if (isAdmin()) { loadUsers(); fillKiosk(); loadEncoding(); loadHealth(); }
+        loadAlertPanel();
+      }
     }
     // Fuera de la pestaña Mosaico el muro se detiene (sin fotogramas ni WebRTC).
     if (tab.dataset.view !== "mosaico") syncWall();
@@ -210,26 +215,113 @@ $$(".tab").forEach((tab) => {
 
 // --------------------------------------------------------------- salud
 
+let lastHealth = null;        // último /api/health (null = sin respuesta)
+let hsNetdataWarn = false;    // Netdata reporta algo que atender (se llena en loadHealth)
+
 async function pollHealth() {
   try {
     const h = await api("/api/health");
+    lastHealth = h;
     $("#dotApi").className = "dot on";
     $("#dotMtx").className = "dot " + (h.mediamtx ? "on" : "off");
     $("#tagDevices").textContent =
       h.devices === 1 ? "1 equipo" : `${h.devices} equipos`;
   } catch (_) {
+    lastHealth = null;
     $("#dotApi").className = "dot off";
     $("#dotMtx").className = "dot off";
   }
+  renderHealthBasics();
+}
+
+// Lo básico de «Salud del equipo», con datos reales de /api/health (no necesita
+// Netdata): servidor, vídeo, detector, cámaras publicadas y disco.
+function healthTile(label, value, level) {
+  const t = document.createElement("div");
+  t.className = "cw-card aj-basic";
+  const l = document.createElement("div"); l.className = "aj-basic-l"; l.textContent = label;
+  const v = document.createElement("div"); v.className = "aj-basic-v " + level; v.textContent = value;
+  t.append(l, v);
+  return t;
+}
+
+function renderHealthBasics() {
+  const box = $("#hsBasics");
+  if (!box) return;
+  const h = lastHealth;
+  const tiles = [healthTile("Servidor de CamWay", h ? "En línea" : "Sin respuesta", h ? "ok" : "bad")];
+  let mark = h ? "ok" : "bad";
+  if (h) {
+    tiles.push(healthTile("Servidor de vídeo", h.mediamtx ? "En línea" : "Sin respuesta", h.mediamtx ? "ok" : "bad"));
+    if (!h.mediamtx) mark = "bad";
+    if (typeof h.detector === "boolean") {
+      tiles.push(healthTile("Detector de IA", h.detector ? "Activo" : "Apagado", h.detector ? "ok" : "warn"));
+    }
+    let pub = 0;
+    state.devices.forEach((d) => (d.streams || []).forEach((st) => { if (st.published) pub++; }));
+    if (pub) {
+      const stale = Number(h.cameras_stale) || 0;
+      tiles.push(healthTile("Cámaras publicadas",
+        stale ? `${Math.max(0, pub - stale)} de ${pub} con imagen` : `${pub} en línea`, stale ? "warn" : "ok"));
+      if (stale && mark === "ok") mark = "warn";
+    }
+    if (typeof h.disk_free_pct === "number") {
+      const lvl = h.disk_free_pct < 8 ? "bad" : h.disk_free_pct < 15 ? "warn" : "ok";
+      tiles.push(healthTile("Disco libre", `${Math.round(h.disk_free_pct)} %`, lvl));
+      if (lvl !== "ok" && mark !== "bad") mark = lvl;
+    }
+  }
+  if (hsNetdataWarn && mark === "ok") mark = "warn";
+  box.replaceChildren(...tiles);
+  ajMark("salud", mark);
 }
 
 // --------------------------------------------------------------- escaneo
 
+const LASTSCAN_KEY = "camway.lastscan";
+let scanMeta = null;            // {kind, cidr, t0} del escaneo en curso
+
 function setScanning(on) {
   $("#btnScan").disabled = on;
+  $("#btnOnvifScan").disabled = on;          // el servidor responde 409 si ya hay uno en curso
   $("#btnStop").disabled = !on;
   $("#progressBox").hidden = !on;
+  if (!on) scanMeta = null;
+  renderScanSummary();
 }
+
+function readLastScan() {
+  try { return JSON.parse(localStorage.getItem(LASTSCAN_KEY) || "null"); }
+  catch (_) { return null; }
+}
+
+function agoText(ts) {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return "hace unos segundos";
+  const m = Math.round(s / 60);
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `hace ${h} h` : `hace ${Math.round(h / 24)} d`;
+}
+
+// Resumen bajo el título. El servidor no guarda «el último escaneo»: se
+// recuerda aquí, en este navegador, solo lo que él mismo vio terminar.
+function renderScanSummary() {
+  const el = $("#scanSummary");
+  if (!el) return;
+  if (scanMeta) { el.textContent = `Escaneando ${scanMeta.cidr}…`; return; }
+  const n = state.devices.size;
+  const inv = n === 0 ? "Todavía no hay equipos. Lanza un escaneo del segmento."
+    : n === 1 ? "1 equipo en el inventario." : `${n} equipos en el inventario.`;
+  const last = readLastScan();
+  el.textContent = last
+    ? `Último escaneo ${agoText(last.ts)} (${last.kind === "onvif" ? "ONVIF" : "RTSP"}): ` +
+      `${last.cidr}, ${last.message}${last.secs != null ? ` en ${last.secs} s` : ""}. ${inv}`
+    : inv;
+}
+setInterval(() => { if (!document.hidden && !scanMeta) renderScanSummary(); }, 60000);
+
+$("#scanForm").addEventListener("submit", (e) => e.preventDefault());   // Enter = clic en Escanear
 
 $("#btnScan").addEventListener("click", async () => {
   const cidr = $("#cidr").value.trim();
@@ -240,8 +332,10 @@ $("#btnScan").addEventListener("click", async () => {
       method: "POST", timeout: 0,
       body: JSON.stringify({ cidr, channels: Number($("#channels").value) || 8 }),
     });
+    scanMeta = { kind: "scan", cidr, t0: Date.now() };
     setScanning(true);
     $("#progStage").textContent = "iniciando";
+    $("#progCount").textContent = "";
     $("#progFill").style.width = "0%";
     toast(`Escaneando ${r.hosts} direcciones en ${r.ports.length} puertos`);
     openEvents();
@@ -257,8 +351,10 @@ $("#btnOnvifScan").addEventListener("click", async () => {
     const r = await api("/api/onvif-scan", {
       method: "POST", timeout: 0, body: JSON.stringify({ cidr }),
     });
+    scanMeta = { kind: "onvif", cidr, t0: Date.now() };
     setScanning(true);
     $("#progStage").textContent = "ONVIF: buscando en :8080/:80";
+    $("#progCount").textContent = "";
     $("#progFill").style.width = "0%";
     toast(`Descubriendo por ONVIF en ${r.hosts} direcciones`);
     openEvents();
@@ -304,6 +400,15 @@ function openEvents() {
     if (e.stage === "fin" || e.stage === "cancelado") {
       $("#progStage").textContent = e.message || "terminado";
       $("#progFill").style.width = "100%";
+      if (e.stage === "fin" && scanMeta) {
+        try {
+          localStorage.setItem(LASTSCAN_KEY, JSON.stringify({
+            ts: Date.now(), kind: scanMeta.kind, cidr: scanMeta.cidr,
+            message: e.message || "terminado",
+            secs: Math.round((Date.now() - scanMeta.t0) / 1000),
+          }));
+        } catch (_) {}
+      }
       setScanning(false);
       sse.close();
       // Las tarjetas que llegaron por SSE no traen el id de cada stream, que
@@ -341,111 +446,267 @@ function openEvents() {
 }
 
 // --------------------------------------------------------------- equipos
+// Lista en filas. Cada equipo es un <div class="cm-row" id="dev-<id>">; filtrar
+// y buscar solo oculta filas (no se reconstruyen, así no se pierde lo que el
+// usuario está escribiendo en una fila).
+
+let invFilter = "all";
+let invQuery = "";
+const invSel = new Set();        // ids de equipos seleccionados (siempre visibles)
+const invAuthOpen = new Set();   // ids con el formulario de clave desplegado
 
 async function loadDevices() {
   const { devices } = await api("/api/devices");
   state.devices.clear();
-  $("#deviceList").innerHTML = "";
-  devices.forEach((d) => upsertDeviceCard(d, false));
-  updateEmpty();
+  invSel.clear();
+  invAuthOpen.clear();
+  $("#deviceList").replaceChildren();
+  devices.forEach((d) => upsertDeviceCard(d, false, true));
+  refreshInventory();
 }
 
-function updateEmpty() {
-  $("#emptyDevices").hidden = state.devices.size > 0;
+function updateEmpty() { scheduleInvRefresh(); }
+
+let invRefreshTimer = null;
+function scheduleInvRefresh() {
+  if (invRefreshTimer) return;
+  invRefreshTimer = setTimeout(() => { invRefreshTimer = null; refreshInventory(); }, 0);
 }
 
-function upsertDeviceCard(dev, isNew) {
+// Estado de un equipo para chips, contadores y filtros.
+function devInfo(dev) {
+  const streams = dev.streams || [];
+  const total = streams.length;
+  const pub = streams.filter((s) => s.published).length;
+  const saved = streams.every((s) => s.id);    // durante el escaneo aún no tienen id
+  let kind;
+  if (total === 0) kind = dev.needs_auth ? "auth" : "new";
+  else kind = pub > 0 ? "pub" : "new";
+  return { total, pub, saved, kind };
+}
+
+function devMatches(dev) {
+  if (invFilter !== "all" && devInfo(dev).kind !== invFilter) return false;
+  const q = invQuery.trim().toLowerCase();
+  if (!q) return true;
+  const hay = [dev.name, dev.host, `${dev.host}:${dev.port}`, dev.vendor, dev.server]
+    .join(" ").toLowerCase();
+  return hay.includes(q);
+}
+
+function refreshInventory() {
+  let all = 0, pub = 0, nw = 0, auth = 0, shown = 0;
+  state.devices.forEach((dev) => {
+    const kind = devInfo(dev).kind;
+    all++;
+    if (kind === "pub") pub++; else if (kind === "auth") auth++; else nw++;
+    const row = document.getElementById(`dev-${dev.id}`);
+    const ok = devMatches(dev);
+    if (row) row.hidden = !ok;
+    if (ok) shown++;
+    else if (invSel.delete(dev.id) && row) {   // lo oculto no queda seleccionado
+      const cb = row.querySelector("[data-sel]"); if (cb) cb.checked = false;
+    }
+  });
+  for (const id of [...invSel]) if (!state.devices.has(id)) invSel.delete(id);
+  $("#statAll").textContent = all;
+  $("#statPub").textContent = pub;
+  $("#statNew").textContent = nw;
+  $("#statAuth").textContent = auth;
+  $$(".cm-stat").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.filter === invFilter)));
+  $("#devShown").textContent = all === 0 ? "" :
+    shown === all ? `${all} en la lista` : `${shown} de ${all} en la lista`;
+  $("#emptyDevices").hidden = shown > 0;
+  $("#emptyDevices").textContent = all === 0
+    ? "Todavía no hay equipos. Lanza un escaneo del segmento."
+    : "Ningún equipo coincide con el filtro o la búsqueda.";
+  $("#selBar").hidden = invSel.size === 0;
+  $("#selLabel").textContent = invSel.size === 1 ? "1 seleccionada" : `${invSel.size} seleccionadas`;
+  const selectable = [...state.devices.values()].filter((d) => devMatches(d) && devInfo(d).saved && devInfo(d).total);
+  const selAll = $("#selAll");
+  selAll.checked = selectable.length > 0 && selectable.every((d) => invSel.has(d.id));
+  selAll.disabled = selectable.length === 0;
+  $("#btnClearAll").disabled = all === 0;
+  renderScanSummary();
+}
+
+$$(".cm-stat").forEach((b) => b.addEventListener("click", () => {
+  invFilter = b.dataset.filter;
+  refreshInventory();
+}));
+$("#devSearch").addEventListener("input", (e) => { invQuery = e.target.value; refreshInventory(); });
+$("#selAll").addEventListener("change", (e) => {
+  state.devices.forEach((dev) => {
+    const info = devInfo(dev);
+    if (!devMatches(dev) || !info.saved || !info.total) return;
+    if (e.target.checked) invSel.add(dev.id); else invSel.delete(dev.id);
+    const cb = document.querySelector(`#dev-${CSS.escape(dev.id)} [data-sel]`);
+    if (cb) cb.checked = e.target.checked;
+  });
+  refreshInventory();
+});
+$("#btnClearSel").addEventListener("click", () => {
+  invSel.clear();
+  $$("#deviceList [data-sel]").forEach((cb) => { cb.checked = false; });
+  refreshInventory();
+});
+$("#btnPubSel").addEventListener("click", () => {
+  const devs = [...invSel].map((id) => state.devices.get(id)).filter(Boolean);
+  publishMany(devs);
+});
+
+function upsertDeviceCard(dev, isNew, append = false) {
   state.devices.set(dev.id, dev);
   const existing = document.getElementById(`dev-${dev.id}`);
   const card = renderDevice(dev, isNew && !existing);
   if (existing) existing.replaceWith(card);
+  else if (append) $("#deviceList").append(card);
   else $("#deviceList").prepend(card);
-  updateEmpty();
+  card.hidden = !devMatches(dev);
+  scheduleInvRefresh();
+}
+
+function fmtRes(s) {
+  return s.width && s.height ? `${s.width}×${s.height}` : "resolución desconocida";
+}
+function fmtCodec(c) { return String(c || "?").replace(/^H(26[45])$/i, "H.$1"); }
+
+function renderStream(dev, s) {
+  // El id real solo existe cuando el equipo ya está guardado; durante el
+  // escaneo las tarjetas llegan sin él y no se puede publicar todavía.
+  const sid = s.id || "";
+  const pub = s.published;
+  return `
+    <li class="cm-stream">
+      <span class="cm-streaminfo" title="${esc(s.url)}">
+        <span class="cm-codec ${s.webrtc_ready ? "ok" : "warn"}">${esc(fmtCodec(s.codec))}</span>
+        ${s.audio_codec ? '<span class="cm-codec">audio</span>' : ""}
+        <span>${esc(fmtRes(s))}</span>
+        <span class="gx-muted">${esc(s.label)}${s.webrtc_ready ? "" : " · se transcodifica"}</span>
+      </span>
+      ${sid ? `<button type="button" class="cm-linkbtn" data-publish data-sid="${esc(sid)}"
+                 data-pub="${pub ? 1 : 0}" aria-label="${pub ? "Quitar del mosaico" : "Publicar"}: ${esc(s.label)}">${pub ? "Quitar" : "Publicar"}</button>` : ""}
+    </li>`;
 }
 
 function renderDevice(dev, animate) {
-  const card = document.createElement("article");
-  card.className = "card" + (animate ? " nuevo" : "");
-  card.id = `dev-${dev.id}`;
+  const info = devInfo(dev);
+  const label = dev.name || dev.host;
+  const first = (dev.streams || [])[0];
+  const pubStream = (dev.streams || []).find((s) => s.published && s.id);
+  const row = document.createElement("div");
+  row.className = "cm-row" + (animate ? " nuevo" : "");
+  row.id = `dev-${dev.id}`;
+  row.dataset.kind = info.kind;
 
-  const badges = [];
-  if (dev.vendor && dev.vendor !== "desconocido")
-    badges.push(`<span class="badge vendor">${esc(dev.vendor)}</span>`);
-  if (dev.kind === "nvr")
-    badges.push(`<span class="badge nvr">DVR/NVR · ${dev.streams.length} canales</span>`);
-  badges.push(dev.needs_auth
-    ? `<span class="badge auth">pide clave</span>`
-    : `<span class="badge libre">sin autenticación</span>`);
-  if (dev.permissive)
-    badges.push(`<span class="badge" title="Sirve el mismo video para cualquier ruta">rutas permisivas</span>`);
+  const vendor = dev.vendor && dev.vendor !== "desconocido" ? dev.vendor : "Sin identificar";
+  const tags = [];
+  if (dev.kind === "nvr") tags.push(`<span class="cm-tag">DVR/NVR · ${esc(info.total)} canales</span>`);
+  if (dev.permissive) tags.push(`<span class="cm-tag" title="Sirve el mismo video para cualquier ruta">rutas permisivas</span>`);
+  if (!dev.needs_auth) tags.push(`<span class="cm-tag" title="El equipo entrega video sin pedir clave">sin clave</span>`);
 
-  card.innerHTML = `
-    <div class="cardhead">
-      <div class="cardtitle">
-        <span class="host">${esc(dev.host)}:${esc(dev.port)}</span>
-        <span class="name" data-name>${esc(dev.name)}</span>
-        <button class="ghost small btnpush" data-act="rename">Nombrar</button>
-        <button class="ghost small" data-act="osd">OSD</button>
-        <button class="ghost small" data-act="forget">Olvidar</button>
-      </div>
-      <div class="cardsub">${dev.server ? esc(dev.server) : "sin banner"}</div>
-      <div class="badges">${badges.join("")}</div>
+  let chip;
+  if (info.kind === "auth") chip = `<span class="cw-chip cw-chip--auth">Pide clave</span>`;
+  else if (info.total === 0) chip = `<span class="cw-chip cw-chip--err">Sin vídeo</span>`;
+  else if (info.kind === "pub") chip = `<span class="cw-chip cw-chip--pub">Publicada${dev.kind === "nvr" && info.pub < info.total ? ` ${esc(info.pub)}/${esc(info.total)}` : ""}</span>`;
+  else chip = `<span class="cw-chip cw-chip--new">${info.saved ? "Sin publicar" : "Nuevo"}</span>`;
+
+  let main;      // acción principal de la fila
+  if (info.kind === "auth") main = `<button type="button" class="cw-btn cw-btn--sm" data-main="auth" aria-expanded="${invAuthOpen.has(dev.id)}">Ingresar clave</button>`;
+  else if (info.total === 0) main = `<button type="button" class="cw-btn cw-btn--sm" disabled>Sin streams</button>`;
+  else if (!info.saved) main = `<button type="button" class="cw-btn cw-btn--primary cw-btn--sm" disabled title="Disponible al terminar el escaneo">Publicar</button>`;
+  else if (info.kind === "pub" && info.pub === info.total) main = `<button type="button" class="cw-btn cw-btn--sm" data-main="view">Ver en mosaico</button>`;
+  else if (info.kind === "pub") main = `<button type="button" class="cw-btn cw-btn--sm" data-main="view">Ver en mosaico</button>`;
+  else main = `<button type="button" class="cw-btn cw-btn--primary cw-btn--sm" data-main="publish">Publicar</button>`;
+
+  const thumb = pubStream
+    ? `<img class="cm-thumbimg" loading="lazy" alt="Vista de ${esc(label)}" src="/api/wall/${encodeURIComponent(pubStream.id)}/frame?t=${Date.now()}">`
+    : (first && first.id
+      ? `<button type="button" class="cm-thumbbtn" data-snap data-sid="${esc(first.id)}" aria-label="Capturar una vista de ${esc(label)}" title="Pulsa para capturar un fotograma">${icon("camera", 18)}</button>`
+      : `<span class="cm-thumbph" aria-hidden="true">${icon(info.kind === "auth" ? "lock" : "noSignal", 18)}</span>`);
+
+  row.innerHTML = `
+    <label class="cm-c-check"><input type="checkbox" data-sel aria-label="Seleccionar ${esc(label)}"
+      ${invSel.has(dev.id) ? "checked" : ""} ${info.saved && info.total ? "" : "disabled"}></label>
+    <div class="cm-c-thumb"><div class="cm-thumb">${thumb}</div></div>
+    <div class="cm-c-name">
+      <div class="cm-name" data-name title="${esc(dev.server || "sin banner")}">${esc(label)}</div>
+      <div class="cm-addr gx-mono">${esc(dev.host)}:${esc(dev.port)}</div>
+      ${dev.error ? `<div class="cm-err">${esc(dev.error)}</div>` : ""}
     </div>
-    <ul class="streams">
-      ${dev.streams.map((s) => renderStream(dev, s)).join("")}
-    </ul>
-    ${dev.error ? `<div class="carderr">${esc(dev.error)}</div>` : ""}
-    ${(dev.needs_auth && dev.streams.length === 0) ? `
-      <div class="authform">
-        <div class="authrow">
-          <input type="text" data-auth-user placeholder="usuario" spellcheck="false" autocomplete="off" value="admin">
-          <input type="password" data-auth-pass placeholder="clave" autocomplete="new-password">
-          <button class="primary small" data-auth-probe>Probar</button>
-        </div>
-        <label class="authsave"><input type="checkbox" data-auth-save checked> recordar esta credencial</label>
-      </div>` : ""}
-  `;
+    <div class="cm-c-vendor"><span>${esc(vendor)}</span>${tags.length ? `<span class="cm-tags">${tags.join("")}</span>` : ""}</div>
+    <ul class="cm-c-streams cm-streams">${info.total
+      ? dev.streams.map((s) => renderStream(dev, s)).join("")
+      : `<li class="cm-stream gx-muted">${dev.needs_auth ? "Sin datos hasta ingresar la clave" : "No entrega ningún stream"}</li>`}</ul>
+    <div class="cm-c-state">${chip}</div>
+    <div class="cm-c-act">
+      ${main}
+      <button type="button" class="cw-ib cw-ib--sm" data-more aria-haspopup="menu" aria-expanded="false"
+        aria-label="Más acciones para ${esc(label)}: nombrar, OSD, olvidar">${icon("more", 16)}</button>
+    </div>
+    ${(info.kind === "auth" && invAuthOpen.has(dev.id)) ? `
+    <div class="cm-auth">
+      <label class="gx-field">Usuario
+        <input type="text" class="gx-in" data-auth-user spellcheck="false" autocomplete="off" value="admin"></label>
+      <label class="gx-field">Clave
+        <input type="password" class="gx-in" data-auth-pass autocomplete="new-password"></label>
+      <button type="button" class="cw-btn cw-btn--primary cw-btn--sm" data-auth-probe>Probar</button>
+      <label class="cm-authsave"><input type="checkbox" data-auth-save checked> recordar esta credencial</label>
+    </div>` : ""}`;
 
-  card.querySelector('[data-act="rename"]').addEventListener("click", async () => {
-    const name = await uiPrompt("Nombre para este equipo", { value: dev.name || "", okLabel: "Guardar" });
-    if (name === null) return;
-    try {
-      await api(`/api/devices/${dev.id}`, {
-        method: "PATCH", body: JSON.stringify({ name }),
-      });
-      dev.name = name;
-      card.querySelector("[data-name]").textContent = name;
-    } catch (err) { toast("No se pudo renombrar: " + err.message, true); }
+  // Selección
+  row.querySelector("[data-sel]").addEventListener("change", (e) => {
+    if (e.target.checked) invSel.add(dev.id); else invSel.delete(dev.id);
+    scheduleInvRefresh();
   });
 
-  card.querySelector('[data-act="osd"]').addEventListener("click", () => openOsdModal(dev));
+  // Vista previa: capturar un fotograma bajo demanda (no martillea la cámara)
+  const snapBtn = row.querySelector("[data-snap]");
+  if (snapBtn) snapBtn.addEventListener("click", () => loadSnapshot(snapBtn));
+  const timg = row.querySelector(".cm-thumbimg");
+  if (timg) timg.addEventListener("error", () => {
+    timg.replaceWith(Object.assign(document.createElement("span"), {
+      className: "cm-thumbph", textContent: "sin imagen",
+    }));
+  }, { once: true });
 
-  card.querySelector('[data-act="forget"]').addEventListener("click", async () => {
-    if (!(await uiConfirm(`¿Quitar ${dev.host} del inventario?`, { okLabel: "Quitar", danger: true }))) return;
-    try {
-      await api(`/api/devices/${dev.id}`, { method: "DELETE" });
-      state.devices.delete(dev.id);
-      card.remove();
-      updateEmpty();
-      pollHealth();
-    } catch (err) { toast("No se pudo quitar el equipo: " + err.message, true); }
+  // Acción principal
+  const mainBtn = row.querySelector("[data-main]");
+  if (mainBtn) mainBtn.addEventListener("click", async () => {
+    const act = mainBtn.dataset.main;
+    if (act === "view") { document.querySelector('.tab[data-view="mosaico"]').click(); return; }
+    if (act === "auth") {
+      if (invAuthOpen.has(dev.id)) invAuthOpen.delete(dev.id); else invAuthOpen.add(dev.id);
+      upsertDeviceCard(dev, false);
+      const again = document.getElementById(`dev-${dev.id}`);
+      const u = again && again.querySelector("[data-auth-pass]");
+      if (u) u.focus();
+      return;
+    }
+    if (act === "publish") publishMany([dev]);
   });
 
-  card.querySelectorAll("[data-publish]").forEach((btn) => {
+  // Más acciones
+  row.querySelector("[data-more]").addEventListener("click", (e) => {
+    openRowMenu(e.currentTarget, [
+      { icon: "edit", label: "Nombrar", run: () => renameDevice(dev) },
+      { icon: "layers", label: "OSD en la cámara", run: () => openOsdModal(dev) },
+      { icon: "trash", label: "Olvidar", danger: true, run: () => forgetDevice(dev) },
+    ]);
+  });
+
+  // Publicar / quitar por stream
+  row.querySelectorAll("[data-publish]").forEach((btn) => {
     btn.addEventListener("click", () => togglePublish(btn, dev));
   });
 
-  card.querySelectorAll("[data-snap]").forEach((img) => {
-    img.addEventListener("click", () => loadSnapshot(img));
-    if (img.dataset.auto === "1") loadSnapshot(img);
-  });
-
-  const probeBtn = card.querySelector("[data-auth-probe]");
+  // Ingreso de clave en la fila
+  const probeBtn = row.querySelector("[data-auth-probe]");
   if (probeBtn) {
     const submit = async () => {
-      const username = card.querySelector("[data-auth-user]").value.trim();
-      const password = card.querySelector("[data-auth-pass]").value;
-      const save = card.querySelector("[data-auth-save]").checked;
+      const username = row.querySelector("[data-auth-user]").value.trim();
+      const password = row.querySelector("[data-auth-pass]").value;
+      const save = row.querySelector("[data-auth-save]").checked;
       if (!username) return toast("Escribe el usuario de la cámara", true);
       probeBtn.disabled = true;
       probeBtn.textContent = "Probando…";
@@ -456,6 +717,7 @@ function renderDevice(dev, animate) {
         });
         if (updated.recovered) {
           toast(`${dev.host}: ${updated.streams.length} stream(s) — credencial correcta`);
+          invAuthOpen.delete(dev.id);
           upsertDeviceCard(updated, false);
           pollHealth();
         } else {
@@ -470,88 +732,185 @@ function renderDevice(dev, animate) {
       }
     };
     probeBtn.addEventListener("click", submit);
-    card.querySelector("[data-auth-pass]").addEventListener("keydown", (e) => {
+    row.querySelector("[data-auth-pass]").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submit();
     });
   }
 
-  return card;
+  return row;
 }
 
-function renderStream(dev, s) {
-  // El id real solo existe cuando el equipo ya está guardado; durante el
-  // escaneo las tarjetas llegan sin él y no se puede publicar todavía.
-  const sid = s.id || "";
-  const codecClass = s.webrtc_ready ? "h264" : "otro";
-  const publishable = Boolean(sid);
-  const pub = s.published;
-
-  return `
-    <li class="streamrow">
-      ${sid
-        ? `<img class="thumb" data-snap data-sid="${esc(sid)}" data-auto="0"
-                alt="miniatura" title="Pulsa para capturar un fotograma"
-                src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">`
-        : `<div class="thumb vacia">sin guardar</div>`}
-      <div class="streaminfo">
-        <div class="top">
-          <span class="path" title="${esc(s.url)}">${esc(s.path)}</span>
-          <span class="chip ${codecClass}">${esc(s.codec)}</span>
-          ${s.audio_codec ? `<span class="chip">audio</span>` : ""}
-        </div>
-        <div class="meta">
-          ${esc(dims(s))}${s.profile ? " · " + esc(s.profile) : ""} · ${esc(s.label)}
-          ${s.webrtc_ready ? "" : " · necesita transcodificar para WebRTC"}
-        </div>
-      </div>
-      ${publishable
-        ? `<button class="${pub ? "ghost" : "primary"} small"
-                   data-publish data-sid="${esc(sid)}" data-pub="${pub ? 1 : 0}">
-             ${pub ? "Quitar" : "Publicar"}
-           </button>`
-        : ""}
-    </li>`;
+async function renameDevice(dev) {
+  const name = await uiPrompt("Nombre para este equipo", { value: dev.name || "", okLabel: "Guardar" });
+  if (name === null) return;
+  try {
+    await api(`/api/devices/${dev.id}`, {
+      method: "PATCH", body: JSON.stringify({ name }),
+    });
+    dev.name = name;
+    upsertDeviceCard(dev, false);
+  } catch (err) { toast("No se pudo renombrar: " + err.message, true); }
 }
 
+async function forgetDevice(dev) {
+  if (!(await uiConfirm(`¿Quitar ${dev.host} del inventario?`, { okLabel: "Quitar", danger: true }))) return;
+  try {
+    await api(`/api/devices/${dev.id}`, { method: "DELETE" });
+    state.devices.delete(dev.id);
+    invSel.delete(dev.id);
+    invAuthOpen.delete(dev.id);
+    const row = document.getElementById(`dev-${dev.id}`);
+    if (row) row.remove();
+    scheduleInvRefresh();
+    pollHealth();
+  } catch (err) { toast("No se pudo quitar el equipo: " + err.message, true); }
+}
+
+// Menú «más acciones» de una fila: un solo menú a la vez, con teclado
+// (flechas, Escape) y foco devuelto al botón.
+let rowMenu = null;
+function closeRowMenu(refocus = false) {
+  if (!rowMenu) return;
+  const { el, btn } = rowMenu;
+  rowMenu = null;
+  el.remove();
+  btn.setAttribute("aria-expanded", "false");
+  if (refocus) btn.focus();
+}
+function openRowMenu(btn, items) {
+  const wasOpen = rowMenu && rowMenu.btn === btn;
+  closeRowMenu();
+  if (wasOpen) return;
+  const el = document.createElement("div");
+  el.className = "cm-menu";
+  el.setAttribute("role", "menu");
+  items.forEach((it) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cm-menuitem" + (it.danger ? " danger" : "");
+    b.setAttribute("role", "menuitem");
+    b.innerHTML = `${icon(it.icon, 16)}<span>${esc(it.label)}</span>`;
+    b.addEventListener("click", () => { closeRowMenu(); it.run(); });
+    el.appendChild(b);
+  });
+  el.addEventListener("keydown", (e) => {
+    const bs = [...el.querySelectorAll("button")];
+    const i = bs.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); bs[(i - 1 + bs.length) % bs.length].focus(); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeRowMenu(true); }
+    else if (e.key === "Tab") closeRowMenu();
+  });
+  document.body.appendChild(el);
+  const r = btn.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + "px";
+  el.style.top = (r.bottom + h + 8 > window.innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  btn.setAttribute("aria-expanded", "true");
+  rowMenu = { el, btn };
+  el.querySelector("button").focus();
+}
+document.addEventListener("click", (e) => {
+  if (rowMenu && !rowMenu.el.contains(e.target) && !rowMenu.btn.contains(e.target)) closeRowMenu();
+}, true);
+window.addEventListener("resize", () => closeRowMenu());
+window.addEventListener("scroll", () => closeRowMenu(), true);
+
+// ¿Qué streams publica la acción «Publicar» de un equipo? Un NVR publica todos
+// sus canales; una cámara, su stream principal (el primero que WebRTC sabe
+// llevar; si ninguno, el primero). El resto se publica desde su fila.
+function streamsToPublish(dev) {
+  const todo = (dev.streams || []).filter((s) => s.id && !s.published);
+  if (!todo.length) return [];
+  if (dev.kind === "nvr") return todo;
+  return [todo.find((s) => s.webrtc_ready) || todo[0]];
+}
+
+async function publishStream(s, on) {
+  if (on) {
+    const r = await api(`/api/streams/${encodeURIComponent(s.id)}/publish`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+    s.published = true;
+    return r;
+  }
+  await api(`/api/streams/${encodeURIComponent(s.id)}/publish`, { method: "DELETE" });
+  s.published = false;
+  return null;
+}
+
+// Publica los equipos indicados, de a 3 a la vez, y avisa al final.
+async function publishMany(devs) {
+  const jobs = [];
+  devs.forEach((dev) => streamsToPublish(dev).forEach((s) => jobs.push({ dev, s })));
+  if (!jobs.length) return toast("No hay nada que publicar en lo seleccionado", true);
+  const btns = [$("#btnPubSel"), ...devs.map((d) => document.querySelector(`#dev-${CSS.escape(d.id)} [data-main="publish"]`))].filter(Boolean);
+  btns.forEach((b) => { b.disabled = true; });
+  let done = 0, failed = 0, transcode = 0, lastErr = "";
+  const touched = new Set();
+  const next = async () => {
+    while (jobs.length) {
+      const { dev, s } = jobs.shift();
+      try {
+        const r = await publishStream(s, true);
+        if (r && r.transcode) transcode++;
+      } catch (err) { failed++; lastErr = err.message; }
+      touched.add(dev);
+      done++;
+      if (devs.length > 1) $("#devShown").textContent = `Publicando… ${done}`;
+    }
+  };
+  await Promise.all([next(), next(), next()]);
+  touched.forEach((dev) => upsertDeviceCard(dev, false));
+  btns.forEach((b) => { b.disabled = false; });
+  const ok = done - failed;
+  if (failed) toast(`${ok} publicada(s), ${failed} con error: ${lastErr}`, true);
+  else toast(ok === 1 && !transcode ? "Publicado; H.264 pasa tal cual"
+    : `${ok} publicada(s)${transcode ? `, ${transcode} con transcodificación (consume CPU)` : ""}`);
+  refreshInventory();
+}
+
+// Publicar o quitar un stream concreto desde su fila.
 async function togglePublish(btn, dev) {
   const sid = btn.dataset.sid;
+  const s = dev.streams.find((x) => x.id === sid);
+  if (!s) return;
   const isPub = btn.dataset.pub === "1";
   btn.disabled = true;
   try {
-    if (isPub) {
-      await api(`/api/streams/${sid}/publish`, { method: "DELETE" });
-      btn.textContent = "Publicar";
-      btn.className = "primary small";
-      btn.dataset.pub = "0";
-      toast("Stream retirado del mosaico");
-    } else {
-      const r = await api(`/api/streams/${sid}/publish`, {
-        method: "POST", body: JSON.stringify({}),
-      });
-      btn.textContent = "Quitar";
-      btn.className = "ghost small";
-      btn.dataset.pub = "1";
-      toast(r.transcode
-        ? "Publicado con transcodificación (consume CPU)"
+    const r = await publishStream(s, !isPub);
+    upsertDeviceCard(dev, false);
+    toast(isPub ? "Stream retirado del mosaico"
+      : r && r.transcode ? "Publicado con transcodificación (consume CPU)"
         : "Publicado; H.264 pasa tal cual");
-    }
   } catch (err) {
     toast(err.message, true);
-  } finally {
     btn.disabled = false;
   }
 }
 
-function loadSnapshot(img) {
-  img.src = `/api/streams/${img.dataset.sid}/snapshot?width=240&t=${Date.now()}`;
-  img.onerror = () => {
-    img.replaceWith(Object.assign(document.createElement("div"), {
-      className: "thumb vacia", textContent: "sin imagen",
+function loadSnapshot(btn) {
+  const img = document.createElement("img");
+  img.className = "cm-thumbimg";
+  img.alt = "Vista previa";
+  img.addEventListener("error", () => {
+    img.replaceWith(Object.assign(document.createElement("span"), {
+      className: "cm-thumbph", textContent: "sin imagen",
     }));
-  };
+  }, { once: true });
+  img.src = `/api/streams/${encodeURIComponent(btn.dataset.sid)}/snapshot?width=240&t=${Date.now()}`;
+  btn.replaceWith(img);
 }
 
 // --------------------------------------------------------------- equipo suelto
+
+$("#btnManual").addEventListener("click", () => {
+  const box = $("#manualBox");
+  const open = box.hidden;
+  box.hidden = !open;
+  $("#btnManual").setAttribute("aria-expanded", String(open));
+  if (open) $("#oneHost").focus();
+});
 
 $("#btnProbe").addEventListener("click", async () => {
   const host = $("#oneHost").value.trim();
@@ -597,7 +956,7 @@ $("#btnOnvif").addEventListener("click", async () => {
     toast(err.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = "Descubrir por ONVIF";
+    btn.textContent = "Buscar por multicast";
   }
 });
 
@@ -667,13 +1026,70 @@ function whepStateText(state, n) {
 // (window.CamWayWall.sync) y los botones, así no hay carreras entre ellos.
 let wallGen = 0;              // generación de loadWall: descarta respuestas viejas
 let wallRunning = false;      // hay refresco / vídeo corriendo ahora
-let wallUserPaused = false;   // «Pausar» pulsado a mano
+let wallUserPaused = false;   // «Pausado» activado a mano (botón En vivo / Pausado)
 let wallSig = null;           // firma de las tejas del último loadWall
 
 // ¿El muro está tapado (otra pestaña o DVR abierto)? Nada debe pedir imagen.
 function wallOffscreen() {
   return document.body.classList.contains("dvr-open") ||
     !$("#view-mosaico")?.classList.contains("active");
+}
+
+// Botón único «En vivo / Pausado» (aria-pressed = el muro está en vivo).
+function paintWallToggle() {
+  const b = $("#btnWallToggle");
+  if (!b) return;
+  b.setAttribute("aria-pressed", String(!wallUserPaused));
+  b.classList.toggle("is-paused", wallUserPaused);
+  b.innerHTML = wallUserPaused
+    ? `${icon("pause", 14)}<span>Pausado</span>`
+    : '<span class="cw-dot cw-dot--live"></span><span>En vivo</span>';
+}
+
+function setWallPaused(p) {
+  wallUserPaused = p;
+  paintWallToggle();
+  paintAllTiles();                 // la insignia pasa a «Pausado» / vuelve
+}
+
+// ---- pie de estado del Mosaico ----
+// «N cámaras · en vivo · conectando · pide clave · sin señal (· en pausa)» contados
+// desde el estado de cada teja (paintTileStatus), y a la derecha la calidad y la
+// detección actuales. Se recalcula con un pequeño retardo: pintar 16 tejas de
+// golpe no hace 16 recuentos.
+const WF_TEXT = {
+  live: (n) => `${n} en vivo`, connecting: (n) => `${n} conectando`,
+  auth: (n) => `${n} ${n === 1 ? "pide clave" : "piden clave"}`, offline: (n) => `${n} sin señal`,
+  paused: (n) => `${n} en pausa`,
+};
+let wfTimer = null;
+function updateWallFooter() {
+  if (wfTimer) return;
+  wfTimer = setTimeout(() => { wfTimer = null; renderWallFooter(); }, 60);
+}
+
+function renderWallFooter() {
+  const foot = $("#wallFoot");
+  if (!foot) return;
+  const counts = { live: 0, connecting: 0, auth: 0, offline: 0, paused: 0 };
+  let ia = 0;
+  state.tiles.forEach((c) => {
+    if (c.status in counts) counts[c.status]++;
+    if (c.config && c.config.enabled) ia++;
+  });
+  const n = state.tiles.size;
+  $("#wfTotal").textContent = `${n} ${n === 1 ? "cámara" : "cámaras"}`;
+  Object.keys(counts).forEach((k) => {
+    const el = foot.querySelector(`[data-wf="${k}"]`);
+    if (!el) return;
+    el.hidden = counts[k] === 0;
+    if (counts[k]) el.querySelector(".cw-wf__txt").textContent = WF_TEXT[k](counts[k]);
+  });
+  const calidad = liveMosaic ? "vídeo en vivo"
+    : lightMode ? "mínima (modo ligero)"
+    : autoQ ? `automática: ${Q_LEVELS[qLevel].name}` : "fija";
+  const deteccion = state.serverDetection ? "servidor" : ia ? "navegador" : "sin IA activa";
+  $("#wfInfo").textContent = `Calidad ${calidad} · Detección: ${deteccion}`;
 }
 
 function startWallFeeds() {
@@ -684,7 +1100,9 @@ function startWallFeeds() {
 // ¿Esta teja necesita su vídeo en vivo para la IA del navegador? (con el
 // detector del servidor activo, no: él procesa y el navegador solo recibe SSE.)
 function keepLiveForAi(c) {
-  return !state.serverDetection && !!(c.config && c.config.enabled);
+  // Solo si la IA del navegador tiene algo que vigilar (persona/vehículo): sin casco
+  // y fuego los detecta solo el servidor, y para eso no hace falta vídeo en vivo aquí.
+  return !state.serverDetection && !!(c.config && c.config.enabled) && browserTargets(c.config).length > 0;
 }
 
 // Detiene refresco, gobernadores y WebRTC SIN destruir las tejas. Con el muro
@@ -716,7 +1134,7 @@ function syncWall() {
 // Al volver a la pestaña Mosaico: si las cámaras no cambiaron, solo se reanuda
 // (las tejas siguen montadas); si cambiaron o nunca cargó bien, se reconstruye.
 async function enterWallView() {
-  wallUserPaused = false;
+  setWallPaused(false);
   if (wallSig === null) return loadWall();
   try {
     const d = await api("/api/wall");
@@ -763,7 +1181,7 @@ async function loadWall() {
     return;
   }
   if (gen !== wallGen) return;      // otra carga más reciente tomó el relevo
-  wallUserPaused = false;           // recargar reanuda, como siempre
+  setWallPaused(false);             // recargar reanuda, como siempre
 
   // Traer la disposición del usuario desde el servidor la primera vez (persiste
   // entre equipos). Luego saveLayout mantiene la caché al día.
@@ -812,6 +1230,7 @@ async function loadWall() {
   try { state.serverDetection = (await api("/api/health")).detector; } catch (_) {}
   await applyServerConfigs();
   if (gen !== wallGen) return;
+  updateWallFooter();
   openDetectionStream();
   startAlarmSweeper();
 
@@ -840,47 +1259,70 @@ function startLiveMosaic() {
 }
 
 // ---- teja del mosaico: se arma en piezas con nombre (HTML, reproductor, audio,
-// hablar, estado, ampliar, arrastre, botones de admin, PTZ). makeTile las une.
+// hablar, estado, ampliar, arrastre, botones de admin, PTZ, menú). makeTile las une.
+
+// Estados visibles de una teja (insignia + panel central). Los textos son fijos:
+// nada de la API entra en ellos.
+const TILE_STATUS = {
+  live: "En vivo", connecting: "Conectando", auth: "Pide clave",
+  offline: "Sin señal", paused: "Pausado",
+};
+const SVG_MINUS = '<svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M5 12h14"/></svg>';
 
 // HTML interno de una teja. Todo dato de la API va por esc() (los nombres y los
 // banners los escribe cualquier equipo de la LAN).
 function tileHtml(tile) {
   const admin = isAdmin();
+  const name = esc(tile.title);
+  const sub = esc([tile.host, tile.vendor].filter(Boolean).join(" · "));
   return `
     <img class="snap" alt="">
     <video playsinline muted></video>
     <canvas class="detoverlay"></canvas>
-    <div class="aialert"><span data-alert-txt>Detección</span></div>
-    <div class="zonetag">▣ zona</div>
-    <div class="schedtag">⏰ horario</div>
-    <div class="tilestate"><div class="spinner"></div><span>en espera</span></div>
-    <div class="ptzpad" hidden>
-      <button class="ptzbtn up" data-ptz="up" title="Arriba" aria-label="Mover cámara arriba">▲</button>
-      <button class="ptzbtn left" data-ptz="left" title="Izquierda" aria-label="Mover cámara a la izquierda">◀</button>
-      <button class="ptzbtn right" data-ptz="right" title="Derecha" aria-label="Mover cámara a la derecha">▶</button>
-      <button class="ptzbtn down" data-ptz="down" title="Abajo" aria-label="Mover cámara abajo">▼</button>
-      ${tile.zoom ? `<button class="ptzbtn zoomin" data-ptz="zoomin" title="Acercar (zoom +)" aria-label="Acercar (zoom óptico)">＋</button>
-      <button class="ptzbtn zoomout" data-ptz="zoomout" title="Alejar (zoom −)" aria-label="Alejar (zoom óptico)">－</button>` : ""}
+    <div class="cw-tilestate" hidden></div>
+    <div class="cw-tile__top">
+      <div class="cw-tile__id">
+        <button type="button" class="cw-tile__name" data-select title="Seleccionar ${name}">${name}</button>
+        <div class="cw-tile__sub">${sub}</div>
+      </div>
+      <span class="cw-tag cw-tag--zone" title="Zona de detección activa" aria-label="Zona de detección activa">${icon("layers", 13)}</span>
+      <span class="cw-tag cw-tag--sched" title="IA con horario" aria-label="IA con horario">${icon("calendar", 13)}</span>
+      <span class="cw-badge cw-badge--connecting" data-badge>${TILE_STATUS.connecting}</span>
     </div>
-    <div class="tilebar">
-      <span class="draghandle" title="Arrastrar" aria-hidden="true">⠿</span>
-      <span class="t">${esc(tile.title)}</span>
-      <span class="chip">${esc(tile.codec)}</span>
-      ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio" aria-label="Oír el audio de la cámara" aria-pressed="false">🔇</button>` : ""}
-      ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)" aria-label="Hablar por el altavoz de la cámara (mantén pulsado)">🎙️</button>` : ""}
-      ${admin ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local" aria-label="Grabación local de la cámara">⏺</button>` : ""}
-      ${admin ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)" aria-label="Optimizar para tiempo real">⚡</button>` : ""}
-      ${admin ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}" aria-label="Activar o desactivar el PTZ">🕹</button>` : ""}
-      <button class="ghost small ai" data-ai title="Comportamiento IA" aria-label="Comportamiento IA de la cámara"><span class="dotai"></span>IA</button>
-      <button class="ghost small" data-play>Ver</button>
+    <div class="aialert">${icon("sparkles", 13)}<span data-alert-txt>Detección</span></div>
+    <div class="cw-ptz" hidden>
+      <button class="cw-ptz__btn up" data-ptz="up" title="Arriba" aria-label="Mover cámara arriba">${icon("chevronDown", 18)}</button>
+      <button class="cw-ptz__btn left" data-ptz="left" title="Izquierda" aria-label="Mover cámara a la izquierda">${icon("chevronLeft", 18)}</button>
+      <button class="cw-ptz__btn right" data-ptz="right" title="Derecha" aria-label="Mover cámara a la derecha">${icon("chevronRight", 18)}</button>
+      <button class="cw-ptz__btn down" data-ptz="down" title="Abajo" aria-label="Mover cámara abajo">${icon("chevronDown", 18)}</button>
+      ${tile.zoom ? `<button class="cw-ptz__btn zoomin" data-ptz="zoomin" title="Acercar (zoom óptico)" aria-label="Acercar (zoom óptico)">${icon("plus", 16)}</button>
+      <button class="cw-ptz__btn zoomout" data-ptz="zoomout" title="Alejar (zoom óptico)" aria-label="Alejar (zoom óptico)">${SVG_MINUS}</button>` : ""}
+    </div>
+    <div class="cw-ctl">
+      <span class="cw-tile__codec">${esc(tile.codec)}</span>
+      <button class="cw-ib cw-ib--glass" type="button" data-enlarge aria-label="Ampliar ${name}" title="Ampliar (doble clic o Intro)"><span class="ico-max">${icon("maximize", 16)}</span><span class="ico-min">${icon("minimize", 16)}</span></button>
+      <button class="cw-ib cw-ib--glass" type="button" data-ptzopen aria-pressed="false" aria-label="Mover cámara (PTZ) de ${name}" title="Mover cámara (PTZ)" hidden>${icon("ptz", 16)}</button>
+      ${tile.audio ? `<button class="cw-ib cw-ib--glass" type="button" data-mute aria-pressed="false" aria-label="Oír el audio de ${name}" title="Oír audio">${icon("volumeOff", 16)}</button>` : ""}
+      ${tile.talk ? `<button class="cw-ib cw-ib--glass" type="button" data-talk aria-label="Hablar por ${name} (mantén pulsado)" title="Hablar (mantén pulsado)">${icon("mic", 16)}</button>` : ""}
+      ${admin ? `<button class="cw-ib cw-ib--glass rec${tile.rec ? " recon" : ""}" type="button" data-rec aria-label="Grabar en este equipo ${name}" title="Grabación local">${icon("record", 16)}</button>` : ""}
+      <button class="cw-ib cw-ib--glass ai" type="button" data-ai aria-label="Detección por IA de ${name}" title="Detección por IA">${icon("sparkles", 14)}<span>IA</span></button>
+      <div class="cw-menuwrap">
+        <button class="cw-ib cw-ib--glass" type="button" data-more aria-haspopup="menu" aria-expanded="false" aria-label="Más acciones de ${name}" title="Más acciones">${icon("more", 16)}</button>
+        <div class="cw-menu cw-menu--up" role="menu" aria-label="Más acciones de ${name}" hidden>
+          <button class="cw-menu__item" type="button" role="menuitem" data-play>${icon("play", 16)}<span class="cw-menu__lbl">Ver en vivo</span></button>
+          ${admin ? `<button class="cw-menu__item" type="button" role="menuitem" data-optimize>${icon("zap", 16)}<span class="cw-menu__lbl">Optimizar tiempo real</span></button>
+          <button class="cw-menu__item" type="button" role="menuitem" data-ptzcfg>${icon("ptz", 16)}<span class="cw-menu__lbl">Activar PTZ (ONVIF)</span></button>` : ""}
+        </div>
+      </div>
     </div>`;
 }
 
-// Elemento de la teja: enfocable con Tab, Enter la amplía/restaura (igual que el
+// Elemento de la teja: enfocable con Tab, Intro la amplía/restaura (igual que el
 // doble clic) y Escape restaura una ampliada dentro de la página.
 function createTileElement(tile) {
   const el = document.createElement("div");
-  el.className = "tile";
+  el.className = "tile cw-tile";
   el.dataset.streamId = tile.stream_id;
   el.draggable = true;
   el.tabIndex = 0;
@@ -898,10 +1340,10 @@ function createTilePlayer(tile, video) {
   return player;
 }
 
-// Audio: el <video> arranca muteado (política de autoplay). Al pulsar 🔇/🔊
-// —gesto de usuario— se desmutea y suena el audio de la cámara (solo las
-// que publican G.711/PCMA; las AAC no traen este botón). Solo una cámara
-// con sonido a la vez para no mezclar varias.
+// Audio: el <video> arranca muteado (política de autoplay). Al pulsar —gesto de
+// usuario— se desmutea y suena el audio de la cámara (solo las que publican
+// G.711/PCMA; las AAC no traen este botón). Solo una cámara con sonido a la vez
+// para no mezclar varias.
 function wireTileAudio(el, tile, video, player) {
   const muteBtn = el.querySelector("[data-mute]");
   if (!muteBtn) return;
@@ -913,18 +1355,18 @@ function wireTileAudio(el, tile, video, player) {
         if (sid !== tile.stream_id && p.video) { p.video.muted = true; }
       });
       document.querySelectorAll("[data-mute]").forEach((b) => {
-        b.textContent = "🔇"; b.setAttribute("aria-pressed", "false");
+        b.innerHTML = icon("volumeOff", 16); b.setAttribute("aria-pressed", "false");
       });
       if (!player.active) { const c = state.tiles.get(tile.stream_id); if (c) goLive(c); }
     }
     video.muted = !on;
     video.volume = 1;
-    muteBtn.textContent = on ? "🔊" : "🔇";
+    muteBtn.innerHTML = icon(on ? "volume" : "volumeOff", 16);
     muteBtn.setAttribute("aria-pressed", on ? "true" : "false");
   });
 }
 
-// Push-to-talk: mantener pulsado 🎙️ habla por el altavoz de la cámara.
+// Push-to-talk: mantener pulsado el micrófono habla por el altavoz de la cámara.
 function wireTileTalk(el, tile) {
   const talkBtn = el.querySelector("[data-talk]");
   if (!talkBtn) return;
@@ -940,41 +1382,84 @@ function wireTileTalk(el, tile) {
   talkBtn.addEventListener("click", (ev) => ev.stopPropagation());
 }
 
-// Texto y nombre accesible del botón Ver/Parar según si el vídeo está activo.
-function refreshPlayBtn(el, title, player) {
-  const btn = el.querySelector("[data-play]");
-  if (!btn) return;
-  btn.textContent = player.active ? "Parar" : "Ver";
-  btn.setAttribute("aria-label", `${player.active ? "Parar el vídeo de" : "Ver en vivo"} ${title}`);
+// ---- estado de la teja: insignia + panel central ----
+// Deriva el estado de lo que se sabe: pide clave (si la API lo marca), pausado,
+// y conectando / en vivo / sin señal según el vídeo WebRTC o los fotogramas.
+function tileStatus(c) {
+  if (c.authError) return "auth";
+  if (wallUserPaused) return "paused";
+  if (c.live) {
+    if (c.videoReady || c.conn === "live") return "live";
+    return c.conn === "offline" ? "offline" : "connecting";
+  }
+  if ((c.snapFails || 0) >= SNAP_FAILS_OFFLINE) return "offline";
+  return c.gotFrame ? "live" : "connecting";
 }
 
-// Estado de conexión sobre la teja y botón Ver/Parar.
+function tileStatePanel(st, c) {
+  if (st === "connecting") return `${icon("refresh", 28)}<span>Conectando…</span>`;
+  if (st === "offline") return `${icon("noSignal", 28)}<span>Sin señal · reintentando</span>`;
+  if (st === "auth") {
+    return `${icon("lock", 28)}<span>La cámara pide usuario y clave</span>` +
+      (isAdmin() ? '<button type="button" class="cw-btn cw-btn--sm" data-enter-pass>Ingresar clave</button>' : "");
+  }
+  return "";
+}
+
+function paintTileStatus(c) {
+  const st = tileStatus(c);
+  if (c.status === st) return;
+  c.status = st;
+  const el = c.el;
+  el.dataset.status = st;
+  el.classList.toggle("snapoff", st === "offline");
+  const badge = el.querySelector("[data-badge]");
+  if (badge) {
+    badge.className = `cw-badge cw-badge--${st}`;
+    badge.textContent = TILE_STATUS[st];
+  }
+  const panel = el.querySelector(".cw-tilestate");
+  if (panel) {
+    const html = tileStatePanel(st, c);
+    panel.innerHTML = html;
+    panel.hidden = !html;
+    panel.dataset.status = st;
+  }
+  updateWallFooter();
+}
+
+function paintAllTiles() { state.tiles.forEach(paintTileStatus); }
+
+// Texto y nombre accesible del elemento Ver/Parar del menú de la teja.
+function refreshPlayBtn(el, title, player) {
+  const it = el.querySelector("[data-play]");
+  if (!it) return;
+  it.querySelector(".cw-menu__lbl").textContent = player.active ? "Parar el vídeo" : "Ver en vivo";
+  it.firstElementChild.outerHTML = icon(player.active ? "pause" : "play", 16);
+}
+
+// Estado de conexión sobre la teja y elemento Ver/Parar.
 function wireTileState(el, tile, player) {
-  const stateEl = el.querySelector(".tilestate");
-  const label = stateEl.querySelector("span");
-  const btn = el.querySelector("[data-play]");
-  const setState = (text) => {
-    const live = text === "en vivo";
-    stateEl.classList.toggle("oculto", live);
-    if (!live) {
-      label.textContent = text;
-      const trabajando = text === "conectando" || text.startsWith("reconectando");
-      stateEl.querySelector(".spinner").style.display = trabajando ? "" : "none";
-    }
-    refreshPlayBtn(el, tile.title, player);
+  player.onState = (st) => {
+    const c = state.tiles.get(tile.stream_id);
+    if (!c) return;
+    c.conn = st;
+    paintTileStatus(c);
   };
-  player.onState = (st, n) => setState(whepStateText(st, n));
   state.players.set(tile.stream_id, player);
 
-  btn.addEventListener("click", () => {
+  el.querySelector("[data-play]").addEventListener("click", () => {
     const c = state.tiles.get(tile.stream_id);
     if (!c) return;
     if (c.live) goSnap(c); else goLive(c);
   });
-  stateEl.classList.add("oculto");   // en fotograma no hay spinner de conexión
+  // «Ingresar clave» (cámara que pide usuario y clave): lleva a la pestaña Cámaras.
+  el.querySelector(".cw-tilestate").addEventListener("click", (e) => {
+    if (e.target.closest("[data-enter-pass]")) $('.tab[data-view="inventario"]')?.click();
+  });
 }
 
-// Ampliar/restaurar: doble clic, Enter o Escape.
+// Ampliar/restaurar (botón, doble clic, Intro o Escape) y selección de la teja.
 function wireTileEnlarge(el, tile) {
   const toggleEnlarge = () => {
     const c = state.tiles.get(tile.stream_id);
@@ -990,11 +1475,17 @@ function wireTileEnlarge(el, tile) {
       toggleFullscreen(el);    // vista normal: pantalla completa del SO
     }
   };
+  el.querySelector("[data-enlarge]").addEventListener("click", (e) => { e.stopPropagation(); toggleEnlarge(); });
   el.addEventListener("dblclick", toggleEnlarge);
   el.addEventListener("keydown", (e) => {
-    if (e.target !== el) return;               // Enter sobre un botón hace su propia acción
+    if (e.target !== el) return;               // Intro sobre un botón hace su propia acción
     if (e.key === "Enter") { e.preventDefault(); toggleEnlarge(); }
     else if (e.key === "Escape" && el.classList.contains("maximized")) { e.preventDefault(); toggleEnlarge(); }
+  });
+  // Seleccionar: clic en la teja o en su nombre (borde azul; la del modo «1»).
+  el.addEventListener("click", (e) => {
+    if (e.target.closest("button:not([data-select]), a, .cw-menu, .cw-ptz")) return;
+    selectTile(tile.stream_id);
   });
 }
 
@@ -1034,6 +1525,10 @@ function createTileCtrl(tile, el, video, player) {
     config: loadAiConfig(tile.stream_id),
     live: false,          // false = mosaico por fotograma; true = vídeo WebRTC
     videoReady: false,    // el vídeo ya tiene su primer frame (oculta el fotograma)
+    conn: "connecting",   // último estado del reproductor WebRTC
+    gotFrame: false,      // ya llegó algún fotograma (modo fotogramas)
+    authError: !!tile.auth_error,   // la API marca «pide usuario y clave» (si lo informa)
+    status: null,         // estado visible actual (ver tileStatus)
     alarmed: false,
     lastHit: 0,
     autoMaxed: false,
@@ -1043,7 +1538,7 @@ function createTileCtrl(tile, el, video, player) {
   };
 }
 
-// Botones de la barra solo para admin: grabación local y optimizar tiempo real.
+// Botones solo para admin: grabación local y optimizar tiempo real.
 function wireTileAdminButtons(el, tile) {
   const recBtn = el.querySelector("[data-rec]");
   if (recBtn) recBtn.addEventListener("click", (ev) => {
@@ -1052,8 +1547,7 @@ function wireTileAdminButtons(el, tile) {
   });
 
   const optBtn = el.querySelector("[data-optimize]");
-  if (optBtn) optBtn.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
+  if (optBtn) optBtn.addEventListener("click", async () => {
     optBtn.classList.add("busy");
     try {
       const r = await api(`/api/streams/${tile.stream_id}/optimize`, { method: "POST", timeout: 0 });
@@ -1067,22 +1561,33 @@ function wireTileAdminButtons(el, tile) {
   });
 }
 
-// PTZ: botón de admin para activar/desactivar (se aplica en sitio, sin rehacer
-// el muro) y flechas visibles solo si la cámara tiene PTZ activado.
+// PTZ. Admin: «Activar/Desactivar PTZ» en el menú «Más» de la teja (se aplica en
+// sitio, sin rehacer el muro). El botón PTZ de los controles y las flechas solo
+// existen si la cámara tiene PTZ activado; las flechas se abren con ese botón.
 function wireTilePtz(el, tile) {
-  const pad = el.querySelector(".ptzpad");
-  const cfgBtn = el.querySelector("[data-ptzcfg]");
+  const pad = el.querySelector(".cw-ptz");
+  const openBtn = el.querySelector("[data-ptzopen]");
+  const cfgItem = el.querySelector("[data-ptzcfg]");
   const paintPtz = () => {
-    pad.hidden = !tile.ptz;
-    if (!cfgBtn) return;
-    cfgBtn.classList.toggle("ptzon", !!tile.ptz);
-    cfgBtn.title = tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)";
+    openBtn.hidden = !tile.ptz;
+    if (!tile.ptz) { openBtn.setAttribute("aria-pressed", "false"); el.classList.remove("ptz-open"); }
+    pad.hidden = !(tile.ptz && el.classList.contains("ptz-open"));
+    if (cfgItem) {
+      cfgItem.querySelector(".cw-menu__lbl").textContent = tile.ptz ? "Desactivar PTZ (ONVIF)" : "Activar PTZ (ONVIF)";
+      cfgItem.classList.toggle("ptzon", !!tile.ptz);
+    }
   };
-  if (cfgBtn) cfgBtn.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
+  openBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !el.classList.contains("ptz-open");
+    el.classList.toggle("ptz-open", open);
+    openBtn.setAttribute("aria-pressed", String(open));
+    paintPtz();
+  });
+  if (cfgItem) cfgItem.addEventListener("click", async () => {
     const enabling = !tile.ptz;
     if (!enabling && !(await uiConfirm(`¿Desactivar el PTZ de "${tile.title}"?`, { okLabel: "Desactivar", danger: true }))) return;
-    cfgBtn.classList.add("busy");
+    cfgItem.classList.add("busy");
     try {
       await api(`/api/devices/${tile.device_id}/ptz-config`, {
         method: "PUT", body: JSON.stringify({ enabled: enabling }) });
@@ -1093,7 +1598,7 @@ function wireTilePtz(el, tile) {
     } catch (e) {
       toast("PTZ: " + e.message, true);
     } finally {
-      cfgBtn.classList.remove("busy");
+      cfgItem.classList.remove("busy");
     }
   });
 
@@ -1114,7 +1619,7 @@ function wireTilePtz(el, tile) {
     });
   });
   el.addEventListener("dblclick", (e) => {   // no maximizar al usar el pad
-    if (e.target.closest(".ptzpad")) e.stopPropagation();
+    if (e.target.closest(".cw-ptz")) e.stopPropagation();
   }, true);
 }
 
@@ -1138,11 +1643,13 @@ function makeTile(tile) {
 
   wireTileAdminButtons(el, tile);
   wireTilePtz(el, tile);
+  wireMenu(el.querySelector("[data-more]"), el.querySelector(".cw-menu"));
 
   setupZoom(ctrl);
   observeTileVisibility(ctrl);
   state.tiles.set(tile.stream_id, ctrl);
   if (ctrl.config.enabled) aiEngine.register(ctrl);
+  paintTileStatus(ctrl);
   return { el, ctrl };
 }
 
@@ -1228,9 +1735,9 @@ function makeZoneBox(zone) {
       <input class="zname" spellcheck="false" aria-label="Nombre de la zona">
       <span class="zcount"></span>
       <span class="zspacer"></span>
-      ${isDefault ? "" : '<button class="ghost small" data-zfit title="Cuando está activo, esta zona NO aparece en «Ajustar a pantalla» del monitor principal; solo en su propia ventana.">▦ Solo su ventana</button>'}
-      <button class="ghost small" data-zwin title="Abrir esta zona en una ventana nueva (pantalla dedicada)">⧉ Ventana</button>
-      ${isDefault ? "" : '<button class="ghost small" data-zdel>Eliminar</button>'}
+      ${isDefault ? "" : `<button class="cw-btn cw-btn--sm" type="button" data-zfit aria-pressed="false" title="Cuando está activo, esta zona NO aparece en la pantalla completa del monitor principal; solo en su propia ventana.">${icon("monitor", 14)}<span>Solo su ventana</span></button>`}
+      <button class="cw-btn cw-btn--sm" type="button" data-zwin title="Abrir esta zona en una ventana nueva (pantalla dedicada)">${icon("external", 14)}<span>Ventana</span></button>
+      ${isDefault ? "" : `<button class="cw-btn cw-btn--sm cw-btn--danger" type="button" data-zdel title="Eliminar la zona (sus cámaras pasan a «Sin zona»)">${icon("trash", 14)}<span>Eliminar</span></button>`}
     </div>
     <div class="zonegrid"></div>`;
 
@@ -1252,8 +1759,8 @@ function makeZoneBox(zone) {
   if (fitBtn) {
     const paint = () => {
       const on = box.dataset.fitExclude === "1";
-      fitBtn.classList.toggle("primary", on);
-      fitBtn.textContent = (on ? "✓ " : "▦ ") + "Solo su ventana";
+      fitBtn.classList.toggle("cw-btn--primary", on);
+      fitBtn.setAttribute("aria-pressed", String(on));
     };
     paint();
     fitBtn.addEventListener("click", () => {
@@ -1322,6 +1829,7 @@ function rebuildLayoutFromDom() {
   }
   saveLayout({ zones });
   boxes.forEach(updateZoneCount);
+  applyColumns();                    // recuenta columnas (Auto) y la barra de zonas
 }
 
 function updateZoneCount(box) {
@@ -1339,10 +1847,16 @@ async function addZone() {
   rebuildLayoutFromDom();
 }
 
-function deleteZone(id) {
+async function deleteZone(id) {
   if (id === "default") return;
   const box = $(`.zonebox[data-zone-id="${id}"]`);
   const defBox = $('.zonebox[data-zone-id="default"]');
+  if (box) {
+    const nombre = box.querySelector(".zname").value.trim() || "la zona";
+    const n = box.querySelectorAll(".tile").length;
+    const msg = `¿Eliminar la zona «${nombre}»?` + (n ? ` Sus ${n} cámaras pasan a «Sin zona».` : "");
+    if (!(await uiConfirm(msg, { okLabel: "Eliminar", danger: true }))) return;
+  }
   if (box && defBox) {
     const defGrid = defBox.querySelector(".zonegrid");
     box.querySelectorAll(".tile").forEach((t) => defGrid.appendChild(t));
@@ -1352,12 +1866,102 @@ function deleteZone(id) {
   rebuildLayoutFromDom();
 }
 
-function applyColumns() {
-  const v = $("#cols").value;
-  const tpl = v === "auto"
-    ? "repeat(auto-fill, minmax(300px, 1fr))" : `repeat(${v}, 1fr)`;
-  $$(".zonegrid").forEach((g) => { g.style.gridTemplateColumns = tpl; });
+// ---- rejilla del mosaico: Auto · 1 · 2×2 · 3×3 ----
+// «Auto» = columnas según las cámaras de cada zona (1→1, ≤4→2, ≤9→3, si no 4);
+// «1» = solo la cámara seleccionada. Se recuerda en este navegador.
+let wallCols = "auto";
+try {
+  const c = localStorage.getItem("camway.cols");
+  if (["auto", "1", "2", "3"].includes(c)) wallCols = c;
+} catch (_) {}
+let selectedStream = null;        // teja seleccionada (borde azul); la que muestra el modo «1»
+let zoneFilter = "all";           // «Todas» o el id de la zona elegida en la barra de zonas
+
+// Barra de zonas (chips): «Todas N · Zona n · +». Solo existe si hay más de una
+// zona. Se reconstruye solo si cambian zonas, nombres o cuentas (así el foco del
+// teclado no se pierde al elegir una).
+function renderZoneBar() {
+  const bar = $("#zoneBar");
+  if (!bar) return;
+  const boxes = $$("#wall .zonebox");
+  if (boxes.length < 2) { bar.hidden = true; bar.dataset.sig = ""; zoneFilter = "all"; return; }
+  if (zoneFilter !== "all" && !boxes.some((b) => b.dataset.zoneId === zoneFilter)) zoneFilter = "all";
+  const zonas = boxes.map((b) => ({
+    id: b.dataset.zoneId, name: b.querySelector(".zname").value.trim() || "Zona",
+    n: b.querySelectorAll(".tile").length,
+  }));
+  const sig = JSON.stringify(zonas);
+  bar.hidden = false;
+  if (bar.dataset.sig !== sig) {
+    bar.dataset.sig = sig;
+    bar.textContent = "";
+    const chip = (id, name, n) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "cw-btn"; b.dataset.zone = id;
+      b.append(name + " ");
+      const c = document.createElement("span");
+      c.className = "cw-btn__n"; c.textContent = String(n);
+      b.append(c);
+      b.addEventListener("click", () => { zoneFilter = id; applyColumns(); });
+      return b;
+    };
+    bar.append(chip("all", "Todas", zonas.reduce((s, z) => s + z.n, 0)));
+    zonas.forEach((z) => bar.append(chip(z.id, z.name, z.n)));
+    const add = document.createElement("button");
+    add.type = "button"; add.className = "cw-btn cw-btn--icon"; add.title = "Nueva zona";
+    add.setAttribute("aria-label", "Nueva zona"); add.innerHTML = icon("plus", 16);
+    add.addEventListener("click", addZone);
+    bar.append(add);
+  }
+  bar.querySelectorAll("[data-zone]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.zone === zoneFilter)));
 }
+
+function autoCols(n) { return n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4; }
+
+function paintGridSeg() {
+  $$("#gridSeg [data-cols]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.cols === wallCols));
+  });
+}
+
+function applyColumns() {
+  renderZoneBar();
+  const solo = wallCols === "1";
+  const enFiltro = (el) => zoneFilter === "all" || el.closest(".zonebox")?.dataset.zoneId === zoneFilter;
+  if (solo && !(selectedStream && state.tiles.has(selectedStream) &&
+                enFiltro(state.tiles.get(selectedStream).el))) {
+    // por defecto, la primera de la zona elegida
+    selectedStream = [...$$("#wall .tile")].find(enFiltro)?.dataset.streamId || null;
+  }
+  state.tiles.forEach((c, sid) => {
+    c.el.hidden = solo && sid !== selectedStream;
+    c.el.classList.toggle("selected", sid === selectedStream);
+  });
+  $$("#wall .zonegrid").forEach((g) => {
+    const n = [...g.children].filter((t) => t.classList.contains("tile") && !t.hidden).length;
+    g.style.setProperty("--cw-cols", solo ? 1 : wallCols === "auto" ? autoCols(n) : Number(wallCols));
+    const box = g.closest(".zonebox");
+    if (box) box.hidden = (solo && n === 0) ||
+      (zoneFilter !== "all" && box.dataset.zoneId !== zoneFilter);
+  });
+  // con una sola zona («Sin zona») no hace falta su cabecera
+  $("#wall").classList.toggle("wall--onezone", $$("#wall .zonebox").length < 2);
+  paintGridSeg();
+}
+
+function selectTile(streamId) {
+  selectedStream = streamId;
+  state.tiles.forEach((c, sid) => c.el.classList.toggle("selected", sid === streamId));
+  if (wallCols === "1") applyColumns();
+}
+
+$$("#gridSeg [data-cols]").forEach((b) => {
+  b.addEventListener("click", () => {
+    wallCols = b.dataset.cols;
+    try { localStorage.setItem("camway.cols", wallCols); } catch (_) {}
+    applyColumns();
+  });
+});
 
 // ---------------- modo "ajustar a pantalla" (video wall) ----------------
 
@@ -1388,6 +1992,7 @@ function fitRender(tileEls) {
   wall.classList.add("fit");
   wall.innerHTML = "";
   const els = [...tileEls.values()];
+  els.forEach((el) => { el.hidden = false; });   // «ajustar» muestra todas (aunque el modo «1» oculte)
   const n = els.length || 1;
 
   const rect = wall.getBoundingClientRect();
@@ -1447,8 +2052,12 @@ function exitFit() {
 
 function setFitMode(on) {
   state.fitMode = on;
-  $("#btnFit").classList.toggle("primary", on);
-  $("#btnFit").textContent = on ? "⛶ Salir de pantalla" : "⛶ Ajustar a pantalla";
+  const fb = $("#btnFit");
+  fb.setAttribute("aria-pressed", String(on));
+  fb.setAttribute("aria-label", on ? "Salir de pantalla completa" : "Pantalla completa");
+  fb.title = on ? "Salir de pantalla completa" : "Pantalla completa: ajusta todas las cámaras al monitor";
+  fb.innerHTML = icon(on ? "minimize" : "maximize", 16);
+  $("#view-mosaico").classList.toggle("is-fit", on);
   if (on) {
     fitRender(currentTileEls());
   } else {
@@ -1513,6 +2122,7 @@ function toggleFullscreen(el) {
 
 function stopWall() {
   wallRunning = false;
+  updateWallFooter();
   if (tileObserver) tileObserver.disconnect();   // las tejas se van a rehacer
   stopSnapRefresh();
   if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
@@ -1525,14 +2135,20 @@ function stopWall() {
 
 $("#btnNewZone").addEventListener("click", addZone);
 $("#btnWallReload").addEventListener("click", () => loadWall());
+// Elemento del menú «Más»: casilla (aria-checked) con un valor opcional a la derecha.
+function paintMenuToggle(b, checked, val) {
+  b.setAttribute("aria-checked", String(!!checked));
+  const v = b.querySelector(".cw-menu__val");
+  if (v) v.textContent = val || "";
+}
+
 function applyLightBtn() {
   const b = $("#btnLight");
   if (!b) return;
-  b.classList.toggle("primary", lightMode);
   b.title = "Forzar calidad mínima en este equipo (desactiva el ajuste automático)";
-  if (lightMode) b.textContent = "🐢 Ligero ✓";
-  else if (autoQ) b.textContent = `📶 Auto: ${Q_LEVELS[qLevel].name}`;
-  else b.textContent = "🐢 Modo ligero";
+  paintMenuToggle(b, lightMode,
+    lightMode ? "mínima" : autoQ ? `auto: ${Q_LEVELS[qLevel].name}` : "");
+  updateWallFooter();
 }
 $("#btnLight").addEventListener("click", () => {
   lightMode = !lightMode;
@@ -1548,8 +2164,7 @@ applyLightBtn();
 function applyAutoLiveBtn() {
   const b = $("#btnAutoLive");
   if (!b) return;
-  b.classList.toggle("primary", autoLive);
-  b.textContent = autoLive ? "🎥 Auto-vivo ✓" : "🎥 Auto-vivo";
+  paintMenuToggle(b, autoLive, "");
 }
 $("#btnAutoLive")?.addEventListener("click", () => {
   autoLive = !autoLive;
@@ -1566,10 +2181,10 @@ applyAutoLiveBtn();
 function applyMosaicModeBtn() {
   const b = $("#btnMosaicMode");
   if (!b) return;
-  b.classList.toggle("primary", liveMosaic);
-  b.textContent = liveMosaic ? "🎬 Vídeo en vivo ✓" : "🎞️ Fotogramas";
+  paintMenuToggle(b, liveMosaic, liveMosaic ? "" : "fotogramas");
+  updateWallFooter();
   const al = $("#btnAutoLive");
-  if (al) al.style.display = liveMosaic ? "none" : "";
+  if (al) al.hidden = liveMosaic;     // en vivo ya están todas: auto-vivo no aplica
 }
 $("#btnMosaicMode")?.addEventListener("click", () => {
   mosaicChoice = liveMosaic ? "frames" : "live";   // alterna la elección
@@ -1620,23 +2235,63 @@ document.addEventListener("click", (e) => {
   const el = $(b.dataset.copy);
   if (!el) return;
   copyText(el.textContent).then((ok) => {
-    if (ok) { b.textContent = "Copiado ✓"; setTimeout(() => (b.textContent = "Copiar"), 1200); }
+    if (ok) { b.textContent = "Copiado"; setTimeout(() => (b.textContent = "Copiar"), 1200); }
     else toast("Selecciona el texto y cópialo manualmente", true);
   });
 });
 
-$("#btnWallStart").addEventListener("click", () => {
-  wallUserPaused = false;
-  if (wallRunning) startWallFeeds();   // ya corría: reinicia el ritmo
+// Un solo botón: En vivo (corriendo) ⇄ Pausado. Pausar corta fotogramas y WebRTC
+// aunque estemos en mosaico en vivo; reanudar los reinicia.
+$("#btnWallToggle").addEventListener("click", () => {
+  setWallPaused(!wallUserPaused);
+  if (!wallUserPaused && wallRunning) startWallFeeds();   // ya corría: reinicia el ritmo
   else syncWall();
 });
-$("#btnWallStop").addEventListener("click", () => {
-  // Pausa de verdad: corta fotogramas y WebRTC aunque estemos en mosaico en vivo.
-  wallUserPaused = true;
-  syncWall();
-});
 
-$("#cols").addEventListener("change", applyColumns);
+// ---- menús emergentes (barra «Más» y menú «Más» de cada teja) ----
+// Un menú es un botón (aria-haspopup) + un <div role="menu"> con elementos
+// role="menuitem*". Se cierra con Escape, al elegir, al pulsar fuera o al abrir otro.
+function closeMenus(except) {
+  $$(".cw-menu:not([hidden])").forEach((m) => {
+    if (m === except) return;
+    m.hidden = true;
+    const btn = m.previousElementSibling;
+    if (btn && btn.hasAttribute("aria-expanded")) btn.setAttribute("aria-expanded", "false");
+    m.closest(".tile")?.classList.remove("menu-open");
+  });
+}
+
+function wireMenu(btn, menu) {
+  const items = () => [...menu.querySelectorAll('[role^="menuitem"]:not([hidden])')];
+  const close = (focusBtn) => {
+    closeMenus();
+    if (focusBtn) btn.focus();
+  };
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!menu.hidden) return close(true);
+    closeMenus(menu);
+    menu.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    btn.closest(".tile")?.classList.add("menu-open");
+    items()[0]?.focus();
+  });
+  menu.addEventListener("click", () => closeMenus());   // elegir un elemento cierra
+  menu.addEventListener("keydown", (e) => {
+    const it = items(), i = it.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); it[(i + 1) % it.length]?.focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); it[(i - 1 + it.length) % it.length]?.focus(); }
+    else if (e.key === "Home") { e.preventDefault(); it[0]?.focus(); }
+    else if (e.key === "End") { e.preventDefault(); it[it.length - 1]?.focus(); }
+    else if (e.key === "Tab") closeMenus();
+  });
+}
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".cw-menu, [aria-haspopup='menu']")) closeMenus();
+});
+wireMenu($("#btnWallMore"), $("#wallMenu"));
+
 
 // --------------------------------------------------------------- IA por cámara
 
@@ -1655,9 +2310,37 @@ const ONGOING_CLASSES = [...FIRE_CLASSES, ...EPP_CLASSES];
 const FIRE_REALARM_MS = 20000;
 const AI_CLEAR_MS = 8000;      // cuánto se mantiene la alarma tras el último acierto
 
+// ---- varios objetivos por cámara ----
+// La config lleva `targets` (lista de "persona", "vehiculo", "epp", "fuego"). Las
+// guardadas con el antiguo `target` (uno solo, o "ambos") se traducen al leerlas.
+const AI_TARGETS = ["persona", "vehiculo", "epp", "fuego"];
+const BROWSER_TARGETS = ["persona", "vehiculo"];   // lo que el modelo del navegador (COCO-SSD) sabe ver
+const TARGET_NAMES = { persona: "Personas", vehiculo: "Vehículos", epp: "Persona sin casco", fuego: "Fuego o humo" };
+
+function targetName(t) { return TARGET_NAMES[t] || t; }
+function targetsFromLegacy(t) {
+  if (t === "ambos") return ["persona", "vehiculo"];
+  return AI_TARGETS.includes(t) ? [t] : ["vehiculo"];
+}
+function cleanTargets(list) {            // sin repetidos ni valores raros, en orden fijo
+  const have = new Set(Array.isArray(list) ? list : []);
+  return AI_TARGETS.filter((t) => have.has(t));
+}
+function cfgTargets(cfg) {               // los objetivos de una config, venga como venga
+  const t = cleanTargets(cfg && cfg.targets);
+  return t.length ? t : targetsFromLegacy(cfg && cfg.target);
+}
+function browserTargets(cfg) { return cfgTargets(cfg).filter((t) => BROWSER_TARGETS.includes(t)); }
+// Valor del antiguo `target` para quien aún no entiende `targets` (p. ej. la app de TV).
+function legacyTarget(targets) {
+  const t = cleanTargets(targets);
+  if (t.length === 2 && t.includes("persona") && t.includes("vehiculo")) return "ambos";
+  return t[0] || "vehiculo";
+}
+
 function defaultAiConfig() {
   return {
-    enabled: false, target: "vehiculo", action: "full", minScore: 0.4, zone: null,
+    enabled: false, targets: ["vehiculo"], action: "full", minScore: 0.4, zone: null,
     sound: true,
     schedule: { enabled: false, days: [], start: "21:00", end: "06:00" },
   };
@@ -1725,7 +2408,12 @@ function refreshZoneTag(ctrl) {
 function loadAiConfig(streamId) {
   try {
     const raw = localStorage.getItem(AI_KEY + streamId);
-    return raw ? { ...defaultAiConfig(), ...JSON.parse(raw) } : defaultAiConfig();
+    if (!raw) return defaultAiConfig();
+    const saved = JSON.parse(raw);
+    const cfg = { ...defaultAiConfig(), ...saved };
+    cfg.targets = cfgTargets(saved);      // de `targets` o, si es una config vieja, de `target`
+    delete cfg.target;
+    return cfg;
   } catch (_) {
     return defaultAiConfig();
   }
@@ -1738,8 +2426,8 @@ async function saveAiConfig(streamId, cfg) {
   await api(`/api/streams/${encodeURIComponent(streamId)}/ai`, {
     method: "PUT",
     body: JSON.stringify({
-      enabled: cfg.enabled, target: cfg.target, min_score: cfg.minScore,
-      action: cfg.action, zone: cfg.zone, schedule: cfg.schedule,
+      enabled: cfg.enabled, targets: cleanTargets(cfg.targets), target: legacyTarget(cfg.targets),
+      min_score: cfg.minScore, action: cfg.action, zone: cfg.zone, schedule: cfg.schedule,
     }),
   });
   try { localStorage.setItem(AI_KEY + streamId, JSON.stringify(cfg)); } catch (_) {}
@@ -1749,7 +2437,7 @@ function serverCfgToLocal(s, streamId) {
   // El sonido es preferencia de ESTE navegador: se conserva de localStorage.
   const local = loadAiConfig(streamId);
   return {
-    enabled: !!s.enabled, target: s.target || "vehiculo",
+    enabled: !!s.enabled, targets: cfgTargets(s),
     action: s.action || "full", minScore: s.min_score ?? 0.4,
     zone: s.zone || null,
     sound: local.sound !== false,
@@ -1769,22 +2457,26 @@ async function applyServerConfigs() {
     refreshAiButton(ctrl);
     refreshZoneTag(ctrl);
     refreshSchedTag(ctrl);
-    if (ctrl.config.enabled && !state.serverDetection) aiEngine.register(ctrl);
+    if (ctrl.config.enabled && !state.serverDetection && browserTargets(ctrl.config).length) aiEngine.register(ctrl);
   });
 }
 
+// Clases del detector que cuentan para esta cámara: la unión de las de cada objetivo.
 function targetClasses(cfg) {
-  if (cfg.target === "persona") return PERSON_CLASSES;
-  if (cfg.target === "ambos") return [...VEHICLE_CLASSES, ...PERSON_CLASSES];
-  if (cfg.target === "fuego") return FIRE_CLASSES;
-  if (cfg.target === "epp") return EPP_CLASSES;
-  return VEHICLE_CLASSES;
+  const out = [];
+  cfgTargets(cfg).forEach((t) => {
+    if (t === "persona") out.push(...PERSON_CLASSES);
+    else if (t === "vehiculo") out.push(...VEHICLE_CLASSES);
+    else if (t === "epp") out.push(...EPP_CLASSES);
+    else if (t === "fuego") out.push(...FIRE_CLASSES);
+  });
+  return [...new Set(out)];
 }
 
 function classLabel(name) {
   return { car: "Auto", truck: "Camión", bus: "Bus", motorcycle: "Moto",
            person: "Persona", head: "Sin casco", helmet: "Con casco",
-           vest: "Chaleco" }[name] || name;
+           vest: "Chaleco", fuego: "Fuego", humo: "Humo" }[name] || name;
 }
 
 function refreshAiButton(ctrl) {
@@ -1821,6 +2513,29 @@ function loadTensorflow() {
       .catch((err) => { tfLoading = null; throw err; });
   }
   return tfLoading;
+}
+
+// ---- estado del motor de detección (¿procesa el servidor o solo el navegador?) ----
+// GET /api/detector/status → {online, last_seen, models:{general, epp, fuego}}. Si el
+// servidor aún no lo ofrece, se usa lo que ya se sabe: `state.serverDetection`.
+const engineStatus = { known: false, online: false, models: null, source: "", ts: 0 };
+
+async function loadEngineStatus(force = false) {
+  if (!force && engineStatus.known && Date.now() - engineStatus.ts < 10000) return engineStatus;
+  try {
+    const r = await api("/api/detector/status", { timeout: 8000 });
+    engineStatus.online = !!r.online;
+    engineStatus.models = r.models && typeof r.models === "object" ? r.models : null;
+    engineStatus.source = "status";
+    state.serverDetection = engineStatus.online;
+  } catch (_) {
+    engineStatus.online = !!state.serverDetection;
+    engineStatus.models = null;
+    engineStatus.source = "health";
+  }
+  engineStatus.known = true;
+  engineStatus.ts = Date.now();
+  return engineStatus;
 }
 
 // El motor comparte un solo modelo y recorre las tejas activas en ronda, para
@@ -1880,7 +2595,7 @@ const aiEngine = {
 
     const list = [...this.active].filter(
       (c) => c.player.active && c.video.readyState >= 2 && c.video.videoWidth > 0 &&
-             isWithinSchedule(c.config.schedule)
+             isWithinSchedule(c.config.schedule) && browserTargets(c.config).length
     );
     if (list.length === 0) return;
 
@@ -2087,8 +2802,10 @@ function goLive(ctrl) {
   ctrl.live = true;
   ctrl.videoReady = false;
   ctrl.el.classList.add("live");
+  ctrl.conn = "connecting";
   ctrl.player.start();
   refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
+  paintTileStatus(ctrl);
   waitVideoFrame(ctrl);
 }
 
@@ -2100,6 +2817,7 @@ function waitVideoFrame(ctrl) {
     if (!ctrl.live || ctrl.videoReady) return;
     ctrl.videoReady = true;
     ctrl.el.classList.add("videoready");
+    paintTileStatus(ctrl);
   };
   // Sondeo del primer frame REAL pintado (fiable en cualquier navegador y no se
   // pierde al cambiar el srcObject, cosa que sí le pasa a requestVideoFrameCallback).
@@ -2134,7 +2852,7 @@ function dropLive(ctrl) {
   ctrl.el.classList.remove("live", "videoready");
   ctrl.player.stop();
   refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
-  ctrl.el.querySelector(".tilestate")?.classList.add("oculto");
+  paintTileStatus(ctrl);
 }
 
 // ---------------- refresco del mosaico por fotogramas ----------------
@@ -2197,12 +2915,12 @@ function bumpSnap(ctrl) {
     if (ok) {
       img.src = next.src;
       qLatSum += performance.now() - t0; qLatN++;
-      ctrl.snapFails = 0; setSnapOffline(ctrl, false);
+      ctrl.snapFails = 0; ctrl.gotFrame = true; paintTileStatus(ctrl);
     } else {
       ctrl.snapFails = (ctrl.snapFails || 0) + 1;
       // El servidor da 503 cuando la cámara lleva >30s sin fotograma nuevo
       // (ver STALE_HIDE en wallcache). Tras unos fallos → "sin conexión".
-      if (ctrl.snapFails >= SNAP_FAILS_OFFLINE) setSnapOffline(ctrl, true);
+      paintTileStatus(ctrl);        // tras SNAP_FAILS_OFFLINE fallos pasa a «Sin señal»
     }
   };
   // Sin respuesta a tiempo: se cancela la carga y cuenta como fallo.
@@ -2311,22 +3029,6 @@ function reconcileAutoLive() {
     _lastVQ.delete(sid);
   });
   autoLiveSet = want;
-}
-
-// Muestra "sin conexión" y atenúa el fotograma viejo cuando el muro deja de
-// recibir imagen de una cámara (colgada/apagada). En vivo lo maneja el player.
-function setSnapOffline(ctrl, off) {
-  const st = ctrl.el.querySelector(".tilestate");
-  if (!st) return;
-  if (off && !ctrl.live && !ctrl.videoReady) {
-    st.classList.remove("oculto");
-    const sp = st.querySelector(".spinner"); if (sp) sp.style.display = "none";
-    const txt = st.querySelector("span"); if (txt) txt.textContent = "sin conexión";
-    ctrl.el.classList.add("snapoff");
-  } else {
-    st.classList.add("oculto");
-    ctrl.el.classList.remove("snapoff");
-  }
 }
 
 // Refresco ROTATIVO: cada ciclo empieza por una teja distinta, así ninguna
@@ -2497,8 +3199,10 @@ function drawDetections(ctrl, preds, wanted, zone, usaZona, vw, vh) {
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, cw, ch);
 
-  // El video va con object-fit:contain; se calcula el rectángulo real.
-  const scale = Math.min(cw / vw, ch / vh);
+  // El vídeo va con object-fit cover (rejilla) o contain (ampliada): se calcula el
+  // rectángulo real según el que tenga ahora.
+  const cover = getComputedStyle(ctrl.video).objectFit === "cover";
+  const scale = cover ? Math.max(cw / vw, ch / vh) : Math.min(cw / vw, ch / vh);
   const dw = vw * scale, dh = vh * scale;
   const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
 
@@ -2548,34 +3252,6 @@ function dismissAlarm(ctrl) {
 
 let aiModalCtrl = null;
 
-function openAiModal(ctrl) {
-  aiModalCtrl = ctrl;
-  const cfg = ctrl.config;
-  $("#aiCamName").textContent = ctrl.title;
-  $("#aiEnabled").checked = cfg.enabled;
-  $("#aiTarget").value = cfg.target;
-  $("#aiAction").value = cfg.action;
-  $("#aiScore").value = Math.round(cfg.minScore * 100);
-  $("#aiScoreVal").textContent = Math.round(cfg.minScore * 100) + "%";
-  $("#aiSound").checked = cfg.sound !== false;
-  $("#aiModelState").textContent = aiEngine.model
-    ? "Modelo listo."
-    : "El modelo se baja al activar (una vez).";
-  updateZoneState(ctrl);
-
-  const s = cfg.schedule || defaultAiConfig().schedule;
-  $("#aiSchedOn").checked = s.enabled;
-  $("#aiStart").value = s.start;
-  $("#aiEnd").value = s.end;
-  $$("#aiDays button").forEach((b) => {
-    b.classList.toggle("on", s.days.includes(Number(b.dataset.d)));
-  });
-  refreshSchedBody();
-
-  $("#aiModal").hidden = false;
-  loadAlertBox(ctrl.streamId);
-}
-
 // ---- dispositivo de WhatsApp que envía (solo admin): estado / desvincular / vincular ----
 const WA_STATE_TXT = {
   open: ["on", "Vinculado"],
@@ -2594,7 +3270,7 @@ async function loadWaCard() {
   let w;
   try { w = await api("/api/settings/whatsapp"); } catch (_) { return; }
   const [cls, txt] = WA_STATE_TXT[w.state] || ["", w.state];
-  $("#waDot").className = "dot " + cls;
+  $("#waDot").className = "cw-dot aj-dot" + (cls ? " " + cls : "");
   $("#waTitle").textContent = w.state === "open"
     ? `WhatsApp vinculado: +${w.number || "?"}${w.name ? " · " + w.name : ""}`
     : `WhatsApp: ${txt}`;
@@ -2698,16 +3374,16 @@ function fmtUptime(s) {
 
 function hsTile(label, value, sub, pct, level) {
   const t = document.createElement("div");
-  t.className = "hstile" + (level && level !== "ok" ? " " + level : "");
-  const l = document.createElement("div"); l.className = "hsl"; l.textContent = label;
-  const v = document.createElement("div"); v.className = "hsv"; v.textContent = value;
+  t.className = "cw-card aj-tile" + (level && level !== "ok" ? " " + level : "");
+  const l = document.createElement("div"); l.className = "aj-tile-l"; l.textContent = label;
+  const v = document.createElement("div"); v.className = "aj-tile-v"; v.textContent = value;
   t.append(l, v);
   if (pct != null) {
-    const b = document.createElement("div"); b.className = "hsbar";
+    const b = document.createElement("div"); b.className = "aj-tile-bar";
     const i = document.createElement("i"); i.style.width = Math.min(100, Math.max(0, pct)) + "%";
     b.append(i); t.append(b);
   }
-  const s = document.createElement("div"); s.className = "hss"; s.textContent = sub;
+  const s = document.createElement("div"); s.className = "aj-tile-s"; s.textContent = sub;
   t.append(s);
   return t;
 }
@@ -2716,28 +3392,36 @@ async function loadHealth() {
   const panel = $("#panelSalud");
   if (!panel || !isAdmin()) return;
   const sum = $("#hsSummary");
+  renderHealthBasics();
   let h;
   try { h = await api("/api/system/health"); }
-  catch (e) { sum.textContent = "No se pudo consultar el estado del equipo: " + e.message; return; }
+  catch (e) { sum.className = "aj-note warn"; sum.textContent = "No se pudo consultar el estado del equipo: " + e.message; return; }
   $("#hsLink").href = `http://${location.hostname}:19999`;
   if (!h.ok) {
-    sum.className = "hint hsstat-warn"; sum.textContent = h.error;
-    $("#hsGrid").replaceChildren(); $("#hsTemps").replaceChildren(); $("#hsCont").hidden = true;
+    // Sin Netdata no es un fallo: solo faltan CPU, memoria y disco del equipo.
+    sum.className = "aj-note";
+    sum.textContent = "CPU, memoria y disco del equipo aparecen aquí cuando Netdata está instalado.";
+    sum.title = h.error || "";
+    hsNetdataWarn = false;
+    $("#hsGrid").replaceChildren(); $("#hsTemps").replaceChildren(); $("#hsContWrap").hidden = true; $("#hsCont").hidden = true;
     return;
   }
-  sum.className = "hint hsstat-" + h.status;
+  sum.title = "";
+  hsNetdataWarn = h.status !== "ok";
+  renderHealthBasics();
+  sum.className = "aj-note " + (h.status === "ok" ? "ok" : "warn");
   sum.textContent = h.status === "ok"
-    ? `✔ Equipo en buen estado · encendido hace ${fmtUptime(h.uptime_s)}`
-    : `⚠ ${h.issues.join(" · ")}`;
+    ? `Equipo en buen estado · encendido hace ${fmtUptime(h.uptime_s)}`
+    : `Atención: ${h.issues.join(" · ")}`;
   $("#hsGrid").replaceChildren(
     hsTile("CPU", h.cpu.pct.toFixed(0) + " %", `carga ${h.cpu.load.join(" / ")} · ${h.cpu.cores} núcleos`, h.cpu.pct, h.cpu.level),
     hsTile("Memoria", h.ram.pct.toFixed(0) + " %", `${h.ram.used_gb} de ${h.ram.total_gb} GB`, h.ram.pct, h.ram.level),
     hsTile("Disco", h.disk.pct.toFixed(0) + " %", `${h.disk.free_gb} GB libres de ${h.disk.total_gb}`, h.disk.pct, h.disk.level),
-    hsTile("Red", `↓ ${h.net.down_mbps} Mb/s`, `↑ ${h.net.up_mbps} Mb/s`, null, "ok"),
+    hsTile("Red (bajada)", `${h.net.down_mbps} Mb/s`, `subida ${h.net.up_mbps} Mb/s`, null, "ok"),
   );
   $("#hsTemps").replaceChildren(...h.sensors.map((s) => {
     const c = document.createElement("span");
-    c.className = "hschip" + (s.level !== "ok" ? " " + s.level : "");
+    c.className = "aj-chip" + (s.level !== "ok" ? " " + s.level : "");
     c.append(s.name);
     const b = document.createElement("b"); b.textContent = s.c.toFixed(0) + " °C"; c.append(b);
     return c;
@@ -2751,12 +3435,13 @@ async function loadHealth() {
     return tr;
   }));
   $("#hsCont").hidden = !h.containers.length;
+  $("#hsContWrap").hidden = !h.containers.length;
 }
 
 // Sondeo único de Ajustes. Solo trabaja si la vista Ajustes está activa y la
 // pestaña del navegador visible (en Mosaico no hay peticiones de Ajustes).
-//   · salud del equipo: cada 5 s (solo admin; loadHealth lo comprueba)
-//   · WhatsApp + destinatarios + log: cada 15 s, UNA consulta de WhatsApp por
+//   · salud del equipo: cada 5 s, solo en la sección «Salud» (admin)
+//   · WhatsApp + destinatarios + log: cada 15 s, solo en la sección «Alertas», UNA consulta de WhatsApp por
 //     ciclo (loadAlertPanel ya llama a loadWaCard) y sin pisar el modal de
 //     vinculación, que tiene su propio sondeo.
 const SETTINGS_TICK_MS = 5000;
@@ -2768,11 +3453,12 @@ function settingsPollActive() {
   return !!(v && v.classList.contains("active")) && !document.hidden;
 }
 
+// Solo se consulta lo de la sección de Ajustes que se está viendo.
 function settingsPollTick(force = false) {
   if (!settingsPollActive()) return;
-  loadHealth();
+  if (ajCurrent === "salud") loadHealth();
   const now = Date.now();
-  if ((force || now - lastAlertsPoll >= ALERTS_EVERY_MS - 500) && $("#waModal").hidden) {
+  if (ajCurrent === "alertas" && (force || now - lastAlertsPoll >= ALERTS_EVERY_MS - 500) && $("#waModal").hidden) {
     loadAlertPanel({ poll: true });
   }
 }
@@ -2806,35 +3492,44 @@ async function paintAlertPanel(opts) {
   try { a = await api("/api/settings/alerts"); } catch (_) { return; }
   const act = a.recipients.filter((r) => r.enabled).length;
   const waWarn = a.wa_state && a.wa_state !== "open" && a.wa_state !== "unconfigured"
-    ? "⚠ WhatsApp sin dispositivo vinculado: las alertas esperan en cola. Avisa al administrador. " : "";
-  $("#alStatus").textContent = waWarn + (!a.channels.whatsapp && !a.channels.email
-    ? "⚠ Todavía no hay destinatarios activos: agrega al menos un número."
-    : `✔ ${act} número(s) activo(s)` + (a.channels.group ? " + un grupo fijo del servidor" : "") +
+    ? "WhatsApp sin dispositivo vinculado: las alertas esperan en cola. Avisa al administrador. " : "";
+  const noRecip = !a.channels.whatsapp && !a.channels.email;
+  const st = $("#alStatus");
+  st.textContent = waWarn + (noRecip
+    ? "Todavía no hay destinatarios activos: agrega al menos un número."
+    : `${act} número(s) activo(s)` + (a.channels.group ? " + un grupo fijo del servidor" : "") +
       (a.pending ? ` · ${a.pending} aviso(s) en cola esperando enlace` : ""));
+  const warn = !!waWarn || noRecip || (a.wa_state && a.wa_state !== "open");
+  st.classList.toggle("warn", !!waWarn || noRecip);
+  ajMark("alertas", warn ? "warn" : "ok");
   const list = $("#alList");
   const sig = JSON.stringify([a.recipients, (a.log || []).slice(0, 10), a.labels]);
   if (opts.poll && (sig === alertPanelSig || list.contains(document.activeElement))) return;
   alertPanelSig = sig;
-  list.innerHTML = "";
+  list.replaceChildren();
   if (!a.recipients.length) {
     const li = document.createElement("li");
-    li.innerHTML = '<span class="hint">Sin números todavía.</span>';
+    li.className = "aj-empty";
+    li.textContent = "Todavía no hay destinatarios. Agrega un número para empezar.";
     list.appendChild(li);
   }
   a.recipients.forEach((r) => {
     const li = document.createElement("li");
+    li.className = "aj-rec";
     const on = document.createElement("input");
-    on.type = "checkbox"; on.checked = r.enabled; on.title = "Recibe alertas";
+    on.type = "checkbox"; on.checked = r.enabled; on.className = "aj-check";
+    on.setAttribute("aria-label", `Recibe alertas: ${r.name || fmtPhone(r.phone)}`);
+    on.title = "Recibe alertas";
     on.addEventListener("change", async () => {
       try {
         await api(`/api/settings/alerts/recipients/${r.id}`, { method: "PUT", body: JSON.stringify({ enabled: on.checked }) });
         loadAlertPanel();
       } catch (e) { toast(e.message, true); on.checked = !on.checked; }
     });
-    const nm = document.createElement("span"); nm.className = "uname"; nm.textContent = r.name;
-    const ph = document.createElement("span"); ph.className = "ucount"; ph.textContent = fmtPhone(r.phone);
-    const sp = document.createElement("span"); sp.className = "uspacer";
-    const test = document.createElement("button"); test.className = "ghost small"; test.textContent = "Probar";
+    const nm = document.createElement("span"); nm.className = "aj-recname"; nm.textContent = r.name || "Sin nombre";
+    const ph = document.createElement("span"); ph.className = "aj-recphone gx-mono"; ph.textContent = fmtPhone(r.phone);
+    const acts = document.createElement("span"); acts.className = "aj-recacts";
+    const test = document.createElement("button"); test.type = "button"; test.className = "cw-btn cw-btn--sm"; test.textContent = "Probar";
     test.addEventListener("click", async () => {
       test.disabled = true;
       try {
@@ -2842,28 +3537,29 @@ async function paintAlertPanel(opts) {
         toast(`Mensaje de prueba enviado a ${r.name}`);
       } catch (e) { toast(e.message, true); } finally { test.disabled = false; }
     });
-    const del = document.createElement("button"); del.className = "ghost small"; del.textContent = "Quitar";
+    const del = document.createElement("button"); del.type = "button"; del.className = "cw-btn cw-btn--sm"; del.textContent = "Quitar";
     del.addEventListener("click", async () => {
       if (!(await uiConfirm(`¿Quitar a ${r.name} (${fmtPhone(r.phone)}) de las alertas?`, { okLabel: "Quitar", danger: true }))) return;
       try { await api(`/api/settings/alerts/recipients/${r.id}`, { method: "DELETE" }); loadAlertPanel(); }
       catch (e) { toast(e.message, true); }
     });
-    [on, nm, ph, sp, test, del].forEach((el) => li.appendChild(el));
+    acts.append(test, del);
+    li.append(on, nm, ph, acts);
     list.appendChild(li);
   });
   const lg = $("#alLog");
-  lg.innerHTML = "";
+  lg.replaceChildren();
   (a.log || []).slice(0, 10).forEach((e) => {
     const li = document.createElement("li");
-    const tx = document.createElement("span");
-    tx.className = "ucount";
-    tx.textContent = `${new Date(e.ts * 1000).toLocaleString()} · ${e.camera} · ` +
+    li.className = "aj-logline";
+    li.textContent = `${new Date(e.ts * 1000).toLocaleString()} · ${e.camera} · ` +
       `${(a.labels && a.labels[e.cls]) || e.cls}${e.test ? " (prueba)" : ""} — ${e.status}`;
-    li.appendChild(tx); lg.appendChild(li);
+    lg.appendChild(li);
   });
   if (!a.log || !a.log.length) {
     const li = document.createElement("li");
-    li.innerHTML = '<span class="hint">Aún no se ha enviado ningún aviso.</span>';
+    li.className = "aj-empty";
+    li.textContent = "Aún no se ha enviado ningún aviso.";
     lg.appendChild(li);
   }
 }
@@ -2882,6 +3578,26 @@ $("#alAdd").addEventListener("click", async () => {
 });
 
 // ---- avisos por WhatsApp / correo (regla del servidor; admin y seguridad) ----
+// Las clases que avisa la regla salen de lo que se vigila: «Persona sin casco»
+// → head; «Fuego o humo» → fuego + humo. (El servidor solo avisa de esas.)
+const ALERT_LABELS = { epp: "Persona sin casco", fuego: "Fuego o humo" };
+
+function alertClassesFor(targets) {
+  const out = [];
+  if (targets.includes("epp")) out.push("head");
+  if (targets.includes("fuego")) out.push("fuego", "humo");
+  return out;
+}
+
+function renderAlertChips() {
+  const chips = $("#alChips");
+  if (!chips) return;
+  const alertable = cleanTargets([...aiDraft.targets]).filter((t) => ALERT_LABELS[t]);
+  chips.replaceChildren(...(alertable.length
+    ? alertable.map((t) => { const s = document.createElement("span"); s.className = "ai-chip"; s.textContent = ALERT_LABELS[t]; return s; })
+    : [Object.assign(document.createElement("span"), { className: "ai-chip none", textContent: "Nada de lo elegido genera aviso" })]));
+}
+
 async function loadAlertBox(streamId) {
   const box = $("#aiAlertBox");
   box.hidden = !canAlerts();
@@ -2889,10 +3605,9 @@ async function loadAlertBox(streamId) {
   $("#alState").textContent = "";
   try {
     const a = await api("/api/settings/alerts");
+    if (!aiModalCtrl || aiModalCtrl.streamId !== streamId) return;   // se cerró o cambió de cámara
     const r = Object.assign({}, a.defaults, a.cameras[streamId] || {});
     $("#alEnabled").checked = !!r.enabled;
-    $("#alHead").checked = r.classes.includes("head");
-    $("#alFire").checked = r.classes.includes("fuego") || r.classes.includes("humo");
     $("#alHits").value = String(r.min_hits);
     $("#alCool").value = String(r.cooldown);
     const n = (a.recipients || []).filter((x) => x.enabled).length;
@@ -2902,18 +3617,17 @@ async function loadAlertBox(streamId) {
     $("#alChannels").textContent = ch.length
       ? `Se enviará por: ${ch.join(" y ")}.` +
         (a.pending ? ` ${a.pending} aviso(s) en cola esperando enlace.` : "")
-      : "Sin destinatarios: agrega números en Ajustes → Destinatarios de alertas.";
+      : "";
+    $("#alNoRecip").hidden = ch.length > 0;
     $("#alTest").disabled = !ch.length;
   } catch (e) {
     $("#alChannels").textContent = "No se pudo leer la configuración de avisos.";
   }
 }
 
-async function saveAlertRule(streamId) {
+async function saveAlertRule(streamId, targets) {
   if (!canAlerts() || $("#aiAlertBox").hidden) return;
-  const classes = [];
-  if ($("#alHead").checked) classes.push("head");
-  if ($("#alFire").checked) classes.push("fuego", "humo");
+  const classes = alertClassesFor(targets);
   await api(`/api/settings/alerts/${encodeURIComponent(streamId)}`, {
     method: "PUT",
     body: JSON.stringify({
@@ -2941,27 +3655,138 @@ $("#alTest").addEventListener("click", async () => {
     btn.disabled = false;
   }
 });
-["alHead", "alFire", "alHits", "alCool"].forEach((id) => {
+["alHits", "alCool"].forEach((id) => {
   $("#" + id).addEventListener("change", () => { $("#alEnabled").checked = true; });
 });
+$("#alGoSettings").addEventListener("click", (e) => {
+  e.preventDefault();
+  closeAiModal();
+  document.querySelector('.tab[data-view="ajustes"]').click();
+  ajSelect("alertas");
+});
 
-function readDays() {
-  return $$("#aiDays button.on").map((b) => Number(b.dataset.d));
+// ---- el modal: un borrador que se pinta con renderAiModal() y se guarda con «Guardar» ----
+const SENS_TEXT = { 60: " · solo lo muy claro", 25: " · más avisos, más falsos" };
+
+function renderAiModal() {
+  const ctrl = aiModalCtrl;
+  if (!ctrl) return;
+  const st = engineStatus;
+  const server = !!st.online;
+  const models = st.models;
+
+  // interruptor general
+  $("#aiOnLabel").textContent = $("#aiEnabled").checked ? "Vigilando" : "Apagada";
+
+  // franja del motor (C14)
+  const eng = $("#aiEngine");
+  eng.dataset.engine = st.known ? (server ? "server" : "browser") : "browser";
+  if (!st.known) {
+    $("#aiEngineTitle").textContent = "Comprobando el detector…";
+    $("#aiEngineText").textContent = "";
+  } else if (server) {
+    const can = [];
+    if (!models || models.general !== false) can.push("personas y vehículos");
+    if (!models || models.epp !== false) can.push("cascos");
+    if (!models || models.fuego !== false) can.push("fuego");
+    const falta = [];
+    if (models && models.epp === false) falta.push("cascos");
+    if (models && models.fuego === false) falta.push("fuego");
+    $("#aiEngineTitle").textContent = "Detección en el servidor";
+    $("#aiEngineText").textContent = "Funciona aunque nadie tenga el panel abierto. Detecta " + can.join(", ") + "." +
+      (falta.length ? " No tiene cargado el modelo de " + falta.join(" ni de ") + "." : "");
+  } else {
+    $("#aiEngineTitle").textContent = "Solo detección en este navegador";
+    $("#aiEngineText").textContent = "El detector del servidor no está activo: solo personas y vehículos, y solo mientras este panel esté abierto.";
+  }
+
+  // tarjetas de objetivo
+  let nActive = 0;
+  $$("#aiTargets .ai-target").forEach((card) => {
+    const t = card.dataset.t;
+    const input = card.querySelector("input");
+    const msg = card.querySelector(".ai-tblocked");
+    let blocked = "";
+    if (t === "epp" || t === "fuego") {
+      if (st.known && !server) blocked = "Necesita el detector del servidor";
+      else if (server && models && models[t] === false) blocked = t === "epp" ? "El servidor no tiene el modelo de cascos" : "El servidor no tiene el modelo de fuego";
+    }
+    const picked = aiDraft.targets.has(t);
+    input.checked = picked;
+    input.disabled = !!blocked;
+    card.classList.toggle("blocked", !!blocked);
+    msg.hidden = !blocked;
+    msg.textContent = blocked ? blocked + (picked ? " · tu elección se conserva" : "") : "";
+    if (picked && !blocked) nActive++;
+  });
+
+  // sensibilidad
+  const pct = Math.round(aiDraft.score * 100);
+  $$("#aiSens button").forEach((b) => b.setAttribute("aria-pressed", String(Math.abs(Number(b.dataset.s) - pct) < 3)));
+  const near = [60, 40, 25].find((p) => Math.abs(p - pct) < 3);
+  $("#aiSensText").textContent = `Confianza mínima ${pct} %` + (near ? SENS_TEXT[near] || "" : "");
+
+  // reacción en pantalla y sonido
+  $$("#aiActions button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.a === aiDraft.action)));
+
+  // cuándo
+  const sched = aiDraft.when === "sched";
+  $$("#aiWhen button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.when === aiDraft.when)));
+  $("#aiSchedBody").hidden = !sched;
+  $$("#aiDays button").forEach((b) => b.setAttribute("aria-pressed", String(aiDraft.days.has(Number(b.dataset.d)))));
+  $("#aiSchedHint").textContent = sched
+    ? scheduleSummary({ enabled: true, days: [...aiDraft.days], start: $("#aiStart").value, end: $("#aiEnd").value })
+    : "Vigila las 24 horas, todos los días.";
+
+  // dónde
+  const hasZone = Array.isArray(aiDraft.zone) && aiDraft.zone.length >= 3;
+  $("#aiZoneSvg").hidden = !hasZone;
+  $("#aiZonePoly").setAttribute("points", hasZone ? aiDraft.zone.map(([x, y]) => `${(x * 100).toFixed(2)},${(y * 100).toFixed(2)}`).join(" ") : "");
+  $("#aiZoneTag").textContent = hasZone ? "Zona definida" : "Toda la imagen";
+  $("#aiZoneState").textContent = hasZone ? "Solo cuenta lo que pasa dentro del área azul." : "Se vigila toda la imagen.";
+  $("#aiZoneAll").disabled = !hasZone;
+
+  renderAlertChips();
+
+  // pie
+  const on = $("#aiEnabled").checked;
+  $("#aiModelState").textContent = !on ? "La IA de esta cámara está apagada"
+    : `${nActive} objetivo${nActive === 1 ? "" : "s"}` +
+      (server ? " · procesa el servidor" : aiEngine.model ? " · modelo listo" : " · el modelo se descarga al guardar (una vez)");
 }
 
-function refreshSchedBody() {
-  const on = $("#aiSchedOn").checked;
-  $("#aiSchedBody").classList.toggle("on", on);
-  const sched = { enabled: on, days: readDays(),
-                  start: $("#aiStart").value, end: $("#aiEnd").value };
-  $("#aiSchedHint").textContent = scheduleSummary(sched);
-}
+// Estado del borrador del modal.
+const aiDraft = { targets: new Set(), score: 0.4, action: "full", when: "always", days: new Set(), zone: null, zoneAtOpen: null };
 
-function updateZoneState(ctrl) {
-  const has = Array.isArray(ctrl.config.zone) && ctrl.config.zone.length >= 3;
-  $("#aiZoneState").textContent = has
-    ? `Zona definida (${ctrl.config.zone.length} puntos). Solo ahí se detecta.`
-    : "Sin zona: se detecta en toda la imagen.";
+async function openAiModal(ctrl) {
+  aiModalCtrl = ctrl;
+  const cfg = ctrl.config;
+  $("#aiCamName").textContent = ctrl.title;
+  const dev = state.devices.get(String(ctrl.streamId).split("__")[0]);
+  $("#aiCamSub").textContent = dev ? `${dev.host}${dev.vendor && dev.vendor !== "desconocido" ? " · " + dev.vendor : ""}` : "";
+  $("#aiEnabled").checked = !!cfg.enabled;
+  aiDraft.targets = new Set(cfgTargets(cfg));
+  aiDraft.score = cfg.minScore ?? 0.4;
+  aiDraft.action = cfg.action || "full";
+  $("#aiSound").checked = cfg.sound !== false;
+  const s = cfg.schedule || defaultAiConfig().schedule;
+  aiDraft.when = s.enabled && s.days && s.days.length ? "sched" : "always";
+  aiDraft.days = new Set((s.days || []).map(Number));
+  $("#aiStart").value = s.start || "21:00";
+  $("#aiEnd").value = s.end || "06:00";
+  aiDraft.zone = cfg.zone || null;
+  aiDraft.zoneAtOpen = JSON.stringify(cfg.zone || null);
+  // vista de la cámara (fotograma ya guardado en el servidor) con la proporción real
+  const box = $(".ai-zonebox");
+  const ar = ctrl.vw && ctrl.vh ? Math.min(2, Math.max(1, ctrl.vw / ctrl.vh)) : 16 / 9;
+  box.style.aspectRatio = String(ar);
+  const url = ctrl.frameUrl || `/api/wall/${encodeURIComponent(ctrl.streamId)}/frame`;
+  $("#aiZoneImg").src = url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+  renderAiModal();
+  $("#aiModal").hidden = false;
+  loadAlertBox(ctrl.streamId);
+  await loadEngineStatus(true);
+  if (aiModalCtrl === ctrl) renderAiModal();
 }
 
 function closeAiModal() {
@@ -2969,37 +3794,70 @@ function closeAiModal() {
   aiModalCtrl = null;
 }
 
-$("#aiScore").addEventListener("input", (e) => {
-  $("#aiScoreVal").textContent = e.target.value + "%";
-});
+// Lo llama el editor de zona al guardar: la zona nueva pasa al borrador del modal.
+function updateZoneState(ctrl) {
+  if (ctrl !== aiModalCtrl) return;
+  aiDraft.zone = ctrl.config.zone || null;
+  aiDraft.zoneAtOpen = JSON.stringify(aiDraft.zone);
+  renderAiModal();
+}
 
+// Al volver del editor de zona (que guarda la zona por su cuenta) se adopta la nueva.
+new MutationObserver(() => {
+  const m = $("#aiModal");
+  if (m.hidden || !aiModalCtrl) return;
+  const cur = JSON.stringify(aiModalCtrl.config.zone || null);
+  if (cur !== aiDraft.zoneAtOpen) {
+    aiDraft.zone = aiModalCtrl.config.zone || null;
+    aiDraft.zoneAtOpen = cur;
+    renderAiModal();
+  }
+}).observe($("#aiModal"), { attributes: true, attributeFilter: ["hidden"] });
+
+// Tocar cualquier ajuste implica que la quieres activar: se marca sola la
+// casilla, para no caer en "guardé pero seguía desactivada".
+function aiTouch() { $("#aiEnabled").checked = true; renderAiModal(); }
+
+$("#aiEnabled").addEventListener("change", renderAiModal);
+$("#aiTargets").addEventListener("change", (e) => {
+  const input = e.target.closest("input[data-target]");
+  if (!input) return;
+  if (input.checked) aiDraft.targets.add(input.dataset.target); else aiDraft.targets.delete(input.dataset.target);
+  aiTouch();
+});
+$("#aiSens").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-s]");
+  if (!b) return;
+  aiDraft.score = Number(b.dataset.s) / 100;
+  aiTouch();
+});
+$("#aiActions").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-a]");
+  if (!b) return;
+  aiDraft.action = b.dataset.a;
+  aiTouch();
+});
 // Al marcar el sonido, suena una vez de prueba (y desbloquea el audio).
 $("#aiSound").addEventListener("change", () => {
   if ($("#aiSound").checked) { unlockAudio(); setTimeout(playAlarm, 60); }
 });
-
-// Tocar cualquier ajuste implica que la quieres activar: se marca sola la
-// casilla, para no caer en "guardé pero seguía desactivada".
-["aiTarget", "aiAction", "aiScore"].forEach((id) => {
-  $("#" + id).addEventListener("change", () => { $("#aiEnabled").checked = true; });
-});
-
-// Horario: días, franja y el interruptor "solo en un horario".
-$("#aiSchedOn").addEventListener("change", () => {
-  if ($("#aiSchedOn").checked) $("#aiEnabled").checked = true;
-  refreshSchedBody();
+$("#aiWhen").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-when]");
+  if (!b) return;
+  aiDraft.when = b.dataset.when;
+  aiTouch();
 });
 $("#aiDays").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-d]");
   if (!b) return;
-  b.classList.toggle("on");
-  $("#aiEnabled").checked = true;
-  refreshSchedBody();
+  const d = Number(b.dataset.d);
+  if (aiDraft.days.has(d)) aiDraft.days.delete(d); else aiDraft.days.add(d);
+  aiTouch();
 });
-["aiStart", "aiEnd"].forEach((id) => {
-  $("#" + id).addEventListener("change", refreshSchedBody);
-});
+["aiStart", "aiEnd"].forEach((id) => { $("#" + id).addEventListener("change", renderAiModal); });
+$("#aiZoneAll").addEventListener("click", () => { aiDraft.zone = null; aiTouch(); });
 $("#aiClose").addEventListener("click", closeAiModal);
+$("#aiCancel").addEventListener("click", closeAiModal);
 $("#aiModal").addEventListener("click", (e) => {
   if (e.target.id === "aiModal") closeAiModal();
 });
@@ -3009,17 +3867,21 @@ $("#aiSave").addEventListener("click", async () => {
   const ctrl = aiModalCtrl;
   const btnSave = $("#aiSave");
   if (btnSave.disabled) return;   // ya hay un guardado en curso
+  const enabled = $("#aiEnabled").checked;
+  let targets = cleanTargets([...aiDraft.targets]);
+  if (enabled && !targets.length) return toast("Elige al menos una cosa que vigilar", true);
+  if (!targets.length) targets = cfgTargets(ctrl.config);   // apagada: se conserva la elección anterior
   btnSave.disabled = true;
   const next = {
-    enabled: $("#aiEnabled").checked,
-    target: $("#aiTarget").value,
-    action: $("#aiAction").value,
-    minScore: Number($("#aiScore").value) / 100,
+    enabled,
+    targets,
+    action: aiDraft.action,
+    minScore: aiDraft.score,
     sound: $("#aiSound").checked,
-    zone: ctrl.config.zone || null,   // la zona se edita aparte; se conserva
+    zone: aiDraft.zone || null,
     schedule: {
-      enabled: $("#aiSchedOn").checked,
-      days: readDays(),
+      enabled: aiDraft.when === "sched",
+      days: [...aiDraft.days].sort((a, b) => a - b),
       start: $("#aiStart").value,
       end: $("#aiEnd").value,
     },
@@ -3038,7 +3900,7 @@ $("#aiSave").addEventListener("click", async () => {
   refreshZoneTag(ctrl);
   refreshSchedTag(ctrl);
   try {
-    await saveAlertRule(ctrl.streamId);
+    await saveAlertRule(ctrl.streamId, targets);
   } catch (err) {
     toast("No se guardaron los avisos: " + err.message, true);
   }
@@ -3047,6 +3909,9 @@ $("#aiSave").addEventListener("click", async () => {
     if (state.serverDetection) {
       // El detector server-side la tomará (poll cada pocos segundos).
       toast(`IA activada en ${ctrl.title} (procesa el servidor)`);
+    } else if (!browserTargets(ctrl.config).length) {
+      // Solo pidió cosas que el navegador no sabe ver (cascos, fuego).
+      toast(`Guardado en ${ctrl.title}: ${targets.map(targetName).join(" y ")} necesita el detector del servidor, que ahora no está activo`, true);
     } else {
       const btn = $("#aiSave");
       btn.disabled = true;
@@ -3055,7 +3920,8 @@ $("#aiSave").addEventListener("click", async () => {
         await aiEngine.ensureModel();
         aiEngine.register(ctrl);
         goLive(ctrl);   // el análisis local necesita el vídeo corriendo
-        toast(`IA activada en ${ctrl.title}`);
+        const noWeb = targets.filter((t) => !BROWSER_TARGETS.includes(t));
+        toast(`IA activada en ${ctrl.title}` + (noWeb.length ? ` (en este navegador solo ${browserTargets(ctrl.config).map(targetName).join(" y ").toLowerCase()})` : ""));
       } catch (err) {
         toast(err.message, true);
         ctrl.config.enabled = false;
@@ -3273,6 +4139,30 @@ initZoneEditor();
 // (vetan la IP del servidor). Las cámaras con clave se dan de alta una a una
 // (su credencial propia o por URL en «Probar un equipo suelto»), sin barrido.
 
+// --- submenú de Ajustes: una sección a la vez ---
+let ajCurrent = "general";
+
+// Punto de color junto a una sección del submenú: ok (verde), warn (ámbar) o bad (rojo).
+function ajMark(id, level) {
+  const b = document.querySelector(`.aj-sidebtn[data-aj-go="${id}"] .aj-mark`);
+  if (b) b.className = "aj-mark" + (level ? " " + level : "");
+}
+
+function ajSelect(id) {
+  const btn = document.querySelector(`.aj-sidebtn[data-aj-go="${id}"]`);
+  if (!btn || btn.style.display === "none") id = canAlerts() && !isAdmin() ? "alertas" : "general";
+  ajCurrent = id;
+  $$(".aj-sidebtn").forEach((b) => b.setAttribute("aria-current", b.dataset.ajGo === id ? "page" : "false"));
+  $$(".aj-section").forEach((sec) => { sec.hidden = sec.dataset.aj !== id; });
+  // Lo de la sección que se abre se pone al día enseguida.
+  if (id === "alertas") loadAlertPanel();
+  else if (id === "usuarios" && isAdmin()) loadUsers();
+  else if (id === "video" && isAdmin()) loadEncoding();
+  else if (id === "kiosco" && isAdmin()) fillKiosk();
+  else if (id === "salud" && isAdmin()) loadHealth();
+}
+$$(".aj-sidebtn").forEach((b) => b.addEventListener("click", () => ajSelect(b.dataset.ajGo)));
+
 // --- OSD en la cámara (nombre + fecha/hora QUEMADOS en el video) ---
 let osdDev = null;
 function openOsdModal(dev) {
@@ -3321,6 +4211,7 @@ $("#osdSave")?.addEventListener("click", async () => {
 async function loadSettings() {
   const s = await api("/api/settings");
   $("#cidr").value = s.cidr;
+  $("#setCidr").value = s.cidr;
   $("#channels").value = s.channels;
   $("#setPorts").value = s.ports.join(", ");
   $("#setConc").value = s.concurrency;
@@ -3339,6 +4230,8 @@ function showLogoPreview(dataUrl) {
     if (dataUrl) { img.src = dataUrl; img.hidden = false; }
     else { img.hidden = true; img.removeAttribute("src"); }
   }
+  const none = $("#logoNone");
+  if (none) none.hidden = !!dataUrl;
 }
 
 // ---- Calidad de vídeo/grabación (resolución, fps, bitrate) ----
@@ -3459,14 +4352,17 @@ $("#btnSaveSettings").addEventListener("click", async () => {
   try {
     const ports = $("#setPorts").value.split(",")
       .map((p) => parseInt(p.trim(), 10)).filter(Boolean);
+    const cidr = $("#setCidr").value.trim();
     await api("/api/settings", {
       method: "POST",
       body: JSON.stringify({
+        ...(cidr ? { cidr } : {}),
         ports,
         concurrency: Number($("#setConc").value),
         connect_timeout: Number($("#setTimeout").value),
       }),
     });
+    if (cidr) $("#cidr").value = cidr;
     $("#settingsHint").textContent = "Guardado.";
     toast("Ajustes guardados");
   } catch (err) {
@@ -3475,105 +4371,370 @@ $("#btnSaveSettings").addEventListener("click", async () => {
 });
 
 // --------------------------------------------------------------- grabaciones
+// Cámaras a la izquierda, un día, un reproductor y la línea de tiempo de 24 h.
+// Todo sale de lo que ya entrega la API: de Blue Iris, el inicio y la duración
+// de cada clip (y su marca de alerta); de la grabación local, los archivos con
+// su hora de modificación (= fin del tramo). Donde la API no da la duración de
+// un tramo (grabación local) se ESTIMA con la separación entre archivos y la
+// línea de tiempo lo avisa. No se inventa nada.
 
 let recDevices = [];
 let recSelected = null;
+let recDay = "today";          // "today" | "yesterday" | "custom"
+let recItems = [];             // tramos y eventos del día, ya normalizados
+let recPlaying = null;         // el que se está reproduciendo
+let recLoadSeq = 0;            // descarta respuestas de una carga anterior
+
+const pad2 = (n) => String(n).padStart(2, "0");
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const fmtHM = (sec) => { const d = new Date(sec * 1000); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const fmtHMS = (sec) => { const d = new Date(sec * 1000); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+
+// Medianoche LOCAL del día elegido.
+function recDayDate() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (recDay === "today") return today;
+  if (recDay === "yesterday") return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec($("#recDate").value);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : today;
+}
+
+function recDayLabel(d) {
+  const txt = d.toLocaleDateString("es", { day: "numeric", month: "long" });
+  if (recDay === "today") return `Hoy, ${txt}`;
+  if (recDay === "yesterday") return `Ayer, ${txt}`;
+  return d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
+}
 
 async function loadRecDevices() {
   let data;
   try { data = await api("/api/recordings/devices"); }
   catch (_) { return; }
-  if (!data.available && !data.devices.length) $("#recHint").textContent = "Blue Iris no está configurado.";
-  recDevices = data.devices;
-  if (!$("#recDate").value) $("#recDate").value = new Date().toISOString().slice(0, 10);
+  recDevices = data.devices || [];
+  const list = $("#recCamList");
   if (!recDevices.length) {
-    $("#recGrid").innerHTML = '<p class="hint">No tienes cámaras con grabaciones.</p>';
-    $("#recCamName").textContent = "—";
+    recSelected = null;
+    list.innerHTML = '<p class="gr-camempty">Ninguna cámara tiene grabaciones. Activa la grabación local con el botón de grabar de una cámara en el Mosaico.</p>';
+    $("#recCamName").textContent = "Grabaciones";
+    $("#recHint").textContent = !data.available ? "Blue Iris no está configurado." : "";
+    closeRecStage();
+    recItems = [];
+    renderRec();
     return;
   }
-  // menú con miniatura por cámara
-  $("#recCamMenu").innerHTML = recDevices.map((d, i) => `
-    <div class="ts-item" data-i="${i}">
-      <img src="${esc(d.thumb)}" alt="" onerror="this.style.visibility='hidden'">
-      <span class="n">${esc(d.name)}</span>
-    </div>`).join("");
-  $$("#recCamMenu .ts-item").forEach((el) =>
-    el.addEventListener("click", () => { recSelectDevice(recDevices[+el.dataset.i]); loadClips(); }));
-  if (!recSelected || !recDevices.some((d) => d.device_id === recSelected.device_id))
-    recSelectDevice(recDevices[0]);
+  list.innerHTML = recDevices.map((d, i) => `
+    <button type="button" class="gr-cam" data-i="${i}" aria-current="false">
+      <span class="gr-camthumb">${d.thumb
+        ? `<img src="${esc(d.thumb)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span class="gr-camph">${icon("camera", 16)}</span></span>
+      <span class="gr-camtxt">
+        <span class="gr-camname">${esc(d.name)}</span>
+        <span class="gr-camsub" data-sub>${d.source === "local" ? "Grabación local" : "Blue Iris"}</span>
+      </span>
+    </button>`).join("");
+  $$("#recCamList .gr-cam").forEach((b) =>
+    b.addEventListener("click", () => recSelectDevice(recDevices[+b.dataset.i])));
+  const keep = recSelected && recDevices.find((d) => d.device_id === recSelected.device_id);
+  recSelectDevice(keep || recDevices[0]);
 }
 
 function recSelectDevice(d) {
+  const changed = !recSelected || recSelected.device_id !== d.device_id;
   recSelected = d;
   $("#recCamName").textContent = d.name;
-  const th = $("#recCamThumb");
-  if (d.thumb) { th.src = d.thumb; th.style.visibility = ""; } else th.style.visibility = "hidden";
-  $("#recCamMenu").hidden = true;
-  $$("#recCamMenu .ts-item").forEach((el) =>
-    el.classList.toggle("sel", recDevices[+el.dataset.i]?.device_id === d.device_id));
+  $$("#recCamList .gr-cam").forEach((b) =>
+    b.setAttribute("aria-current", String(recDevices[+b.dataset.i]?.device_id === d.device_id)));
+  if (changed) closeRecStage();
+  loadClips();
 }
 
-$("#recCamTrigger").addEventListener("click", (e) => {
-  e.stopPropagation();
-  $("#recCamMenu").hidden = !$("#recCamMenu").hidden;
-});
-document.addEventListener("click", (e) => {
-  if (!e.target.closest("#recCamSel")) $("#recCamMenu").hidden = true;
-});
+// ---- día
+function setRecDay(day) {
+  recDay = day;
+  $$("#recDays button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.day === day)));
+  const di = $("#recDate");
+  di.hidden = day !== "custom";
+  if (day === "custom") {
+    if (!di.value) di.value = ymd(recDayDate());
+    di.max = ymd(new Date());
+  }
+  loadClips();
+}
+$$("#recDays button").forEach((b) => b.addEventListener("click", () => setRecDay(b.dataset.day)));
+$("#recDate").addEventListener("change", loadClips);
+
+// ---- carga y normalización
+function parseDur(txt) {          // "00:01:12 (3.2MB)" → 72
+  const m = /(\d+):(\d{2}):(\d{2})/.exec(String(txt || ""));
+  return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0;
+}
+
+// Duración típica de un archivo continuo: la mediana de la separación entre
+// archivos consecutivos (el servidor no la entrega). Sin datos: 10 min, que es
+// el valor por defecto del servidor.
+function estimateSegLen(mtimes) {
+  const gaps = [];
+  for (let i = 1; i < mtimes.length; i++) {
+    const g = mtimes[i] - mtimes[i - 1];
+    if (g >= 60 && g <= 3600) gaps.push(g);
+  }
+  if (!gaps.length) return { sec: 600, measured: false };
+  gaps.sort((a, b) => a - b);
+  return { sec: gaps[Math.floor(gaps.length / 2)], measured: true };
+}
+
+// Hora de inicio (epoch, s) de un archivo continuo de MediaMTX: «%Y-%m-%d_%H-%M-%S-%f.mp4».
+// El nombre lleva la hora local del servidor; aquí se lee como hora de ESTE navegador y
+// nameShift() corrige la diferencia de zona horaria.
+function segStartFromName(name) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d+))?\.mp4$/i.exec(name || "");
+  if (!m) return null;
+  const sec = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() / 1000;
+  return m[7] ? sec + Number("0." + m[7]) : sec;
+}
+
+// `ds` = mtime − inicio leído del nombre (null si el nombre no se pudo leer). Si el servidor y
+// este navegador están en la misma zona, cada valor es la duración real (de 0 a 1 h). Si no,
+// todos salen corridos un múltiplo de 15 min: se deduce el corrimiento con el valor más
+// pequeño (siempre hay un tramo corto: el último, aún abierto) y se comprueba que con él
+// todas las duraciones tengan sentido. Devuelve el corrimiento en segundos, o null si no encaja.
+function nameShift(ds) {
+  const v = ds.filter((d) => d != null);
+  if (!v.length) return null;
+  const ok = (off) => v.every((d) => d - off > -2 && d - off <= 3600);
+  if (ok(0)) return 0;
+  const off = Math.floor((Math.min(...v) + 2) / 900) * 900;
+  return ok(off) ? off : null;
+}
+
+function eventLabel(name) {       // «2026-11-13_10-00-00_Persona_sin_casco.mp4» → «Persona sin casco»
+  const m = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_(.+?)\.mp4$/i.exec(name || "");
+  const raw = m ? m[1] : "";
+  return raw ? raw.replace(/_/g, " ") : "Evento";
+}
+
+async function fetchBlueIris(d, dayDate) {
+  const data = await api(`/api/recordings/${encodeURIComponent(d.device_id)}/clips?date=${ymd(dayDate)}`);
+  const dev = encodeURIComponent(d.device_id);
+  const items = (data.clips || []).map((c) => {
+    const dur = parseDur(c.size);
+    return {
+      kind: (c.flags & 2) ? "event" : "cont", label: (c.flags & 2) ? "Alerta" : "",
+      start: c.date, end: c.date + dur, dur, size: c.size || "",
+      thumb: `/api/recordings/${dev}/thumb?path=${encodeURIComponent(c.path)}`,
+      url: `/api/recordings/${dev}/video.mp4?path=${encodeURIComponent(c.path)}`,
+      name: "",
+    };
+  });
+  items.sort((a, b) => a.start - b.start);
+  return { items, hint: `${items.length} grabación(es)`, note: "" };
+}
+
+async function fetchLocal(d, t0, t1) {
+  const data = await api(`/api/recordings/${encodeURIComponent(d.device_id)}`);
+  const recs = data.recordings || [];
+  const mode = data.config && data.config.mode;
+  const modeTxt = mode === "continuous" ? "Solo continuo" : mode ? "Continuo + eventos" : "";
+  const sub = $(`#recCamList .gr-cam[data-i="${recDevices.indexOf(d)}"] [data-sub]`);
+  if (sub && modeTxt) sub.textContent = modeTxt;
+  const dev = encodeURIComponent(d.device_id);
+  const fileUrl = (r) => `/api/recordings/${dev}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${encodeURIComponent(r.kind)}`;
+  const conts = recs.filter((r) => r.kind !== "event").sort((a, b) => a.mtime - b.mtime);
+  // Inicio exacto: MediaMTX nombra cada archivo con su hora de inicio y `mtime`
+  // es la hora de fin. Si algún nombre no trae ese formato, ese tramo se estima.
+  const parsed = conts.map((r) => segStartFromName(r.name));
+  const shift = nameShift(conts.map((r, i) => (parsed[i] == null ? null : r.mtime - parsed[i])));
+  const seg = estimateSegLen(conts.map((r) => r.mtime));
+  let prevEnd = 0;
+  let nExact = 0, nEst = 0;
+  const items = [];
+  conts.forEach((r, i) => {
+    const exact = parsed[i] != null && shift != null;
+    const start = exact ? parsed[i] + shift : Math.max(r.mtime - seg.sec, prevEnd);
+    prevEnd = r.mtime;
+    if (r.mtime <= t0 || start >= t1) return;          // fuera del día (los que cruzan medianoche cuentan)
+    if (exact) nExact++; else nEst++;
+    items.push({ kind: "cont", label: "", start, end: r.mtime, dur: 0, size: fmtSize(r.size), thumb: "", url: fileUrl(r), name: r.name, exact });
+  });
+  recs.filter((r) => r.kind === "event" && r.mtime >= t0 && r.mtime < t1).forEach((r) => {
+    items.push({ kind: "event", label: eventLabel(r.name), start: r.mtime, end: r.mtime, dur: 0, size: fmtSize(r.size), thumb: "", url: fileUrl(r), name: r.name });
+  });
+  items.sort((a, b) => a.start - b.start);
+  const nCont = items.filter((i) => i.kind === "cont").length;
+  const nEv = items.length - nCont;
+  const hint = items.length
+    ? `${nCont} tramo(s) continuo(s) y ${nEv} evento(s)${modeTxt ? " · " + modeTxt : ""}`
+    : recDay === "today" ? "Grabando localmente; aún no hay archivos de hoy (o la grabación se activó hace poco)." : "";
+  // Solo se avisa cuando hay tramos con duración estimada (nombre sin formato conocido).
+  const note = nEst
+    ? `${nExact ? "Algunos tramos" : "Los tramos"} no traen su hora de inicio en el nombre: su duración se ${seg.measured ? "estima" : "supone"} en ~${Math.round(seg.sec / 60)} min.`
+    : "";
+  return { items, hint, note };
+}
 
 async function loadClips() {
-  const dev = recSelected && recSelected.device_id;
-  const date = $("#recDate").value;
-  const grid = $("#recGrid");
-  if (!dev) return;
+  const d = recSelected;
+  if (!d) return;
+  const seq = ++recLoadSeq;
+  const dayDate = recDayDate();
+  const t0 = dayDate.getTime() / 1000;
+  const t1 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate() + 1).getTime() / 1000;
   $("#recHint").textContent = "Cargando…";
-  grid.innerHTML = "";
-  // Local si lo dice el server, o si la cámara no es de Blue Iris (sin bi_camera).
-  if (recSelected.source === "local" || !recSelected.bi_camera)
-    return loadLocalClips(dev, grid);
-  let data;
-  try { data = await api(`/api/recordings/${dev}/clips?date=${date}`); }
-  catch (err) { $("#recHint").textContent = err.message; return; }
-  $("#recHint").textContent = `${data.clips.length} grabación(es)`;
-  if (!data.clips.length) { grid.innerHTML = '<p class="hint">Sin grabaciones ese día.</p>'; return; }
-  data.clips.forEach((c) => grid.appendChild(recCard(dev, c)));
-  // Cargar las miniaturas con concurrencia limitada: así el pool de conexiones
-  // no se satura y la reproducción de un clip no queda encolada tras ellas.
-  thumbQueue = [...grid.querySelectorAll("img[data-src]")];
+  let res;
+  try {
+    res = (d.source === "local" || !d.bi_camera) ? await fetchLocal(d, t0, t1) : await fetchBlueIris(d, dayDate);
+  } catch (err) {
+    if (seq !== recLoadSeq) return;
+    recItems = [];
+    renderRec();
+    $("#recHint").textContent = err.message;
+    return;
+  }
+  if (seq !== recLoadSeq) return;
+  recItems = res.items;
+  renderRec(res);
+}
+
+// ---- pintar
+function itemText(it) {
+  if (it.kind === "event") return `${it.label || "Evento"} · ${fmtHM(it.start)}`;
+  return it.end > it.start ? `${fmtHM(it.start)}–${fmtHM(it.end)}` : fmtHM(it.start);
+}
+
+function renderRec(res = { hint: "", note: "" }) {
+  const dayDate = recDayDate();
+  const t0 = dayDate.getTime() / 1000;
+  const t1 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate() + 1).getTime() / 1000;
+  const span = t1 - t0;
+  $("#recDayLabel").textContent = recDayLabel(dayDate);
+  $("#recHint").textContent = recSelected ? res.hint || "" : $("#recHint").textContent;
+  $("#recTlNote").textContent = res.note || "";
+
+  // línea de tiempo
+  const track = $("#recTrack");
+  track.replaceChildren();
+  const pct = (sec) => Math.max(0, Math.min(100, ((sec - t0) / span) * 100));
+  recItems.forEach((it, i) => {
+    if (it.kind === "cont" || it.dur > 0) {
+      if (it.end <= it.start) return;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "gr-seg" + (it.kind === "event" ? " gr-seg-ev" : "");
+      b.style.left = pct(it.start) + "%";
+      b.style.width = Math.max(0.35, pct(it.end) - pct(it.start)) + "%";
+      const txt = `Grabación ${itemText(it)}`;
+      b.setAttribute("aria-label", txt); b.title = txt;
+      b.dataset.k = i;
+      b.addEventListener("click", () => playItem(it));
+      track.appendChild(b);
+    }
+  });
+  recItems.forEach((it, i) => {
+    if (it.kind !== "event") return;
+    const m = document.createElement("button");
+    m.type = "button";
+    m.className = "gr-mark";
+    m.style.left = pct(it.start) + "%";
+    const txt = `Evento: ${it.label || "Evento"} a las ${fmtHM(it.start)}`;
+    m.setAttribute("aria-label", txt); m.title = txt;
+    m.dataset.k = i;
+    m.addEventListener("click", () => playItem(it));
+    track.appendChild(m);
+  });
+  if (recDay === "today") {         // «ahora», con la hora real del navegador
+    const now = Date.now() / 1000;
+    if (now >= t0 && now < t1) {
+      const n = document.createElement("span");
+      n.className = "gr-now-mark"; n.style.left = pct(now) + "%"; n.title = "Ahora";
+      n.setAttribute("aria-hidden", "true");
+      track.appendChild(n);
+    }
+  }
+
+  // listas
+  const events = recItems.map((it, i) => [it, i]).filter(([it]) => it.kind === "event");
+  const conts = recItems.map((it, i) => [it, i]).filter(([it]) => it.kind === "cont");
+  $("#recEvBox").hidden = events.length === 0;
+  $("#recEvCount").textContent = events.length === 1 ? "1 clip" : `${events.length} clips`;
+  $("#recContCount").textContent = conts.length === 0 ? "" : conts.length === 1 ? "1 tramo" : `${conts.length} tramos`;
+  fillClipGrid($("#recEvGrid"), events);
+  fillClipGrid($("#recGrid"), conts);
+  const none = recItems.length === 0;
+  const empty = $("#recEmpty");
+  empty.hidden = !none || !recSelected;
+  empty.textContent = none ? "Sin grabaciones ese día." : "";
+  $("#recContTitle").textContent = "Grabación continua";
+  if (recPlaying) markPlaying();
+  // Miniaturas con concurrencia limitada: no saturan el pool de conexiones.
+  thumbQueue = [...document.querySelectorAll("#view-grabaciones img[data-src]")];
   pumpThumbs();
 }
 
-// Grabaciones LOCALES (las que CamWay graba por su cuenta, no Blue Iris).
-async function loadLocalClips(dev, grid) {
-  let data;
-  try { data = await api(`/api/recordings/${dev}`); }
-  catch (err) { $("#recHint").textContent = err.message; return; }
-  const recs = data.recordings || [];
-  const mode = data.config && data.config.mode;
-  $("#recHint").textContent = recs.length
-    ? `${recs.length} grabación(es) locales${mode ? " · modo " + mode : ""}`
-    : "Grabando localmente; aún no hay archivos (o grabación recién activada).";
-  if (!recs.length) { grid.innerHTML = '<p class="hint">Sin grabaciones todavía.</p>'; return; }
-  recs.forEach((r) => grid.appendChild(localRecCard(dev, r)));
+function fillClipGrid(grid, entries) {
+  grid.innerHTML = entries.map(([it, i]) => `
+    <button type="button" class="gr-clip" data-k="${i}" aria-current="false">
+      <span class="gr-clipthumb">
+        ${it.thumb ? `<img data-src="${esc(it.thumb)}" alt="" decoding="async" onerror="this.style.display='none'">` : ""}
+        <span class="gr-clipph">${icon(it.kind === "event" ? "bell" : "film", 20)}</span>
+        ${it.dur > 0 ? `<span class="gr-clipdur">${esc(fmtDur(it.dur))}</span>` : ""}
+      </span>
+      <span class="gr-cliplabel">${esc(itemText(it))}</span>
+      <span class="gr-clipsub">${esc(it.size)}</span>
+    </button>`).join("");
+  grid.querySelectorAll(".gr-clip").forEach((b) =>
+    b.addEventListener("click", () => playItem(recItems[+b.dataset.k])));
 }
 
-function localRecCard(dev, r) {
-  const el = document.createElement("div");
-  el.className = "reccard";
-  const url = `/api/recordings/${dev}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${r.kind}`;
-  const tag = r.kind === "event" ? '<span class="alert" title="Clip de evento">🔔</span>' : "";
-  const label = r.kind === "event" ? "evento" : "continuo";
-  el.innerHTML = `
-    <div class="recthumb norec">
-      <span class="play">▶</span>${tag}
-      <span class="dur">${label}</span>
-    </div>
-    <div class="recmeta"><div class="t">${esc(fmtRecTime(r.mtime))}</div><div class="s">${esc(fmtSize(r.size))}</div></div>`;
-  el.addEventListener("click", () =>
-    playRecUrl(`${recSelected.name} — ${fmtRecTime(r.mtime)}`, url));
-  return el;
+function fmtDur(s) {
+  const m = Math.floor(s / 60), r = Math.round(s % 60);
+  return m >= 60 ? `${Math.floor(m / 60)}:${pad2(m % 60)}:${pad2(r)}` : `${m}:${pad2(r)}`;
 }
 
+// ---- reproductor
+function markPlaying() {
+  const k = recItems.indexOf(recPlaying);
+  document.querySelectorAll("#view-grabaciones [data-k]").forEach((el) => {
+    const on = +el.dataset.k === k;
+    if (el.classList.contains("gr-clip")) el.setAttribute("aria-current", String(on));
+    el.classList.toggle("on", on);
+  });
+}
+
+function playItem(it) {
+  if (!it) return;
+  recPlaying = it;
+  const v = $("#recStageVideo");
+  const empty = $("#recStageEmpty");
+  v.pause(); v.removeAttribute("src"); v.load();
+  $("#recStageMsg").textContent = "Preparando vídeo…";
+  empty.hidden = false;
+  v.onplaying = () => { empty.hidden = true; };
+  v.onerror = () => { $("#recStageMsg").textContent = "No se pudo reproducir esta grabación."; empty.hidden = false; };
+  v.src = it.url;
+  v.load();
+  v.play().catch(() => {});
+  const dl = $("#recDl");
+  dl.href = it.url; dl.hidden = false;
+  if (it.name) dl.setAttribute("download", it.name); else dl.setAttribute("download", "");
+  $("#recStageInfo").textContent = `${recSelected ? recSelected.name + " — " : ""}${recDayLabel(recDayDate())}, ${itemText(it)}${it.size ? " · " + it.size : ""}`;
+  markPlaying();
+  v.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function closeRecStage() {
+  const v = $("#recStageVideo");
+  v.pause(); v.removeAttribute("src"); v.load();
+  v.onplaying = null; v.onerror = null;
+  recPlaying = null;
+  $("#recStageMsg").textContent = "Elige un tramo en la línea de tiempo o en la lista para reproducirlo.";
+  $("#recStageEmpty").hidden = false;
+  $("#recStageInfo").textContent = "";
+  $("#recDl").hidden = true;
+  document.querySelectorAll("#view-grabaciones .on").forEach((el) => el.classList.remove("on"));
+}
+
+// Miniaturas de Blue Iris con concurrencia limitada (el pool de conexiones no
+// se satura y la reproducción de un clip no queda encolada tras ellas).
 let thumbQueue = [];
 let thumbActive = 0;
 const THUMB_CONCURRENCY = 4;
@@ -3588,50 +4749,12 @@ function pumpThumbs() {
 }
 function onThumbDone() { thumbActive--; pumpThumbs(); }
 
-function fmtClipTime(ts) {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function recCard(dev, c) {
-  const el = document.createElement("div");
-  el.className = "reccard";
-  const dur = (c.size || "").split("(")[0].trim();
-  const alert = (c.flags & 2) ? '<span class="alert" title="Con alerta">🔔</span>' : "";
-  const thumb = `/api/recordings/${encodeURIComponent(dev)}/thumb?path=${encodeURIComponent(c.path)}`;
-  el.innerHTML = `
-    <div class="recthumb">
-      <img data-src="${esc(thumb)}" alt="" decoding="async" onerror="this.style.display='none'">
-      <span class="play">▶</span>${alert}
-      <span class="dur">${esc(dur)}</span>
-    </div>
-    <div class="recmeta"><div class="t">${esc(fmtClipTime(c.date))}</div><div class="s">${esc(c.size)}</div></div>`;
-  el.addEventListener("click", () => openRecPlayer(dev, c));
-  return el;
-}
-
-function openRecPlayer(dev, c) {
-  const url = `/api/recordings/${dev}/video.mp4?path=${encodeURIComponent(c.path)}`;
-  $("#recPlayTitle").textContent =
-    `${recSelected?.name || ""} — ${fmtClipTime(c.date)}`;
-  $("#recPlayInfo").textContent = "Preparando vídeo…  " + (c.size || "");
-  const v = $("#recVideo");
-  v.pause(); v.removeAttribute("src"); v.load();   // limpiar carga previa colgada
-  v.onplaying = () => { $("#recPlayInfo").textContent = c.size || ""; };
-  v.onerror = () => { $("#recPlayInfo").textContent = "No se pudo reproducir esta grabación."; };
-  $("#recDownload").href = url;
-  $("#recPlayer").hidden = false;
-  v.src = url;
-  v.load();
-  v.play().catch(() => {});
-}
-
+// El reproductor rápido (modal) lo usa «Grabación local» de una cámara del mosaico.
 function closeRecPlayer() {
   const v = $("#recVideo");
   v.pause(); v.removeAttribute("src"); v.load();
   $("#recPlayer").hidden = true;
 }
-
-$("#recLoad").addEventListener("click", loadClips);
 $("#recPlayClose").addEventListener("click", closeRecPlayer);
 $("#recPlayer").addEventListener("click", (e) => { if (e.target.id === "recPlayer") closeRecPlayer(); });
 
@@ -3667,55 +4790,56 @@ async function openRecModal(deviceId, title, recBtn) {
 
   const modal = document.createElement("div");
   modal.className = "modal";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "recCfgTitle");
   modal.innerHTML = `
     <div class="modalcard">
       <div class="modalhead">
-        <h3>Grabación local — ${esc(title)}</h3>
-        <button class="ghost small" data-close>Cerrar</button>
+        <h3 id="recCfgTitle">Grabación local — ${esc(title)}</h3>
+        <button type="button" class="cw-ib cw-ib--sm" data-modal-close aria-label="Cerrar">${icon("x", 16)}</button>
       </div>
-      <div class="aibody">
-        <label class="switch"><input type="checkbox" id="recEnabled" ${on ? "checked" : ""}>
-          <span>Grabar esta cámara</span></label>
-        <p class="hint">Por defecto NO se graba. Al activarla, la cámara queda
-          conectada 24/7 (consume CPU y disco). Borra sola lo más viejo.</p>
-        <div class="recfields">
-          <label>Modo
-            <select id="recMode">
-              <option value="hybrid"${cfg.mode !== "continuous" ? " selected" : ""}>Híbrido: continuo + clips de evento</option>
-              <option value="continuous"${cfg.mode === "continuous" ? " selected" : ""}>Solo continuo 24/7</option>
-            </select>
-          </label>
-          <label>Retención continuo (días)
-            <input type="number" id="recContDays" min="1" max="60" value="${esc(cfg.cont_days || 3)}">
-          </label>
-          <label id="recEvWrap">Retención clips de evento (días)
-            <input type="number" id="recEventDays" min="1" max="90" value="${esc(cfg.event_days || 7)}">
-          </label>
-        </div>
-        <div class="reclist" id="recList2">
-          ${data.recordings.length ? "" : '<p class="hint">Aún no hay grabaciones.</p>'}
-        </div>
+      <label class="mo-switch"><input type="checkbox" class="mo-sw" id="recEnabled" ${on ? "checked" : ""}>
+        <span>Grabar esta cámara</span></label>
+      <p class="mo-intro">Por defecto no se graba. Al activarla, la cámara queda conectada 24/7 (consume CPU y disco). Borra sola lo más viejo.</p>
+      <div class="mo-recfields">
+        <label class="gx-field mo-span2">Modo
+          <select id="recMode" class="gx-in">
+            <option value="hybrid"${cfg.mode !== "continuous" ? " selected" : ""}>Híbrido: continuo + clips de evento</option>
+            <option value="continuous"${cfg.mode === "continuous" ? " selected" : ""}>Solo continuo 24/7</option>
+          </select>
+        </label>
+        <label class="gx-field">Retención del continuo (días)
+          <input type="number" id="recContDays" class="gx-in" min="1" max="60" value="${esc(cfg.cont_days || 3)}">
+        </label>
+        <label class="gx-field" id="recEvWrap">Retención de clips de evento (días)
+          <input type="number" id="recEventDays" class="gx-in" min="1" max="90" value="${esc(cfg.event_days || 7)}">
+        </label>
       </div>
-      <div class="aifoot">
-        <span class="hint" id="recSaveHint"></span>
-        <button class="primary" data-save>Guardar</button>
+      <div class="mo-reclist" id="recList2">
+        ${data.recordings.length ? "" : '<p class="gx-empty">Aún no hay grabaciones.</p>'}
+      </div>
+      <div class="mo-foot">
+        <span class="gx-hint" id="recSaveHint" role="status"></span>
+        <button type="button" class="cw-btn cw-btn--primary" data-save>Guardar</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
 
   const list = modal.querySelector("#recList2");
   for (const r of data.recordings) {
-    const row = document.createElement("div");
-    row.className = "recrow";
-    const tag = r.kind === "event" ? '<span class="evtag">evento</span>' : "";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "mo-recrow";
+    const tag = r.kind === "event" ? '<span class="mo-evtag">evento</span>' : "";
     const url = `/api/recordings/${deviceId}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${r.kind}`;
-    row.innerHTML = `<span class="rt">▶ ${esc(fmtRecTime(r.mtime))} ${tag}</span><span class="rs">${esc(fmtSize(r.size))}</span>`;
+    row.innerHTML = `<span class="rt">${icon("play", 12)}${esc(fmtRecTime(r.mtime))} ${tag}</span><span class="rs">${esc(fmtSize(r.size))}</span>`;
     row.addEventListener("click", () => playRecUrl(`${title} — ${fmtRecTime(r.mtime)}`, url));
     list.appendChild(row);
   }
 
   const close = () => modal.remove();
-  modal.querySelector("[data-close]").addEventListener("click", close);
+  modal.querySelector("[data-modal-close]").addEventListener("click", close);
   modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
 
   const syncMode = () => {
@@ -3808,8 +4932,9 @@ function applyRole() {
   $$("[data-admin]").forEach((el) => { el.style.display = admin ? "" : "none"; });
   if (u.role === "seguridad") {        // jefe de seguridad: Ajustes = solo los avisos
     const t = $('.tab[data-view="ajustes"]'); if (t) t.style.display = "";
-    $$("#view-ajustes > section.panel").forEach((p) => { p.hidden = p.id !== "panelAlertas"; });
+    const side = $("#ajSide"); if (side) side.hidden = true;   // una sola sección: sin submenú
   }
+  ajSelect(u.role === "seguridad" ? "alertas" : "general");
   if (!admin) {                       // viewer: solo mosaico
     $$(".tab").forEach((t) => t.classList.remove("active"));
     $$(".view").forEach((v) => v.classList.remove("active"));
@@ -3865,16 +4990,16 @@ async function buildCamChecks(container, selected = []) {
     const pub = (d.streams || []).find((s) => s.published);
     const thumb = pub ? `/api/wall/${encodeURIComponent(pub.id)}/frame` : "";   // fotograma cacheado
     return `
-    <label class="camcheck">
-      <span class="camthumb">${thumb
-        ? `<img src="${esc(thumb)}" alt="" onerror="this.remove()">`
-        : ""}<span class="noimg">sin vista</span></span>
-      <span class="camrow">
+    <label class="aj-cam">
+      <span class="aj-camthumb"><span class="aj-noimg">${icon("camera", 18)}</span>${thumb
+        ? `<img src="${esc(thumb)}" alt="" loading="lazy" onerror="this.remove()">`
+        : ""}</span>
+      <span class="aj-camrow">
         <input type="checkbox" value="${esc(d.id)}" ${sel.has(d.id) ? "checked" : ""}>
-        <span class="camname">${esc(camLabel(d))}</span>
+        <span class="aj-camname">${esc(camLabel(d))}</span>
       </span>
     </label>`;
-  }).join("") || '<span class="hint">Escanea o agrega cámaras primero.</span>';
+  }).join("") || '<span class="gx-hint">Escanea o agrega cámaras primero.</span>';
 }
 
 // querySelectorAll dentro de un nodo concreto
@@ -3890,7 +5015,7 @@ $("#btnAddUser").addEventListener("click", async () => {
     await api("/api/users", { method: "POST", body: JSON.stringify({ username, password, role, cameras: [] }) });
     $("#uName").value = ""; $("#uPass").value = "";
     toast(role === "viewer"
-      ? `Viewer ${username} creado — asígnale cámaras con «Cámaras»`
+      ? `Vigilante ${username} creado — asígnale cámaras con «Cámaras»`
       : `Usuario ${username} creado`);
     loadUsers();
   } catch (err) { toast(err.message, true); }
@@ -3901,40 +5026,47 @@ async function loadUsers() {
   if (!list) return;
   let data;
   try { data = await api("/api/users"); } catch (_) { return; }
-  list.innerHTML = "";
+  list.replaceChildren();
   data.users.forEach((u) => list.appendChild(userRow(u)));
 }
 
+const ROLE_LABEL = { admin: "Administrador", viewer: "Vigilante", seguridad: "Seguridad" };
+
 function userRow(u) {
   const li = document.createElement("li");
+  li.className = "aj-urow";
   const admin = u.role === "admin";
+  const n = (u.cameras || []).length;
   li.innerHTML = `
-    <span class="uname">${esc(u.username)}</span>
-    <span class="urole ${admin ? "admin" : ""}">${esc(u.role)}</span>
-    <span class="ucount">${admin ? "todas las cámaras" : u.cameras.length + " cámara(s)"}</span>
-    <span class="uspacer"></span>
-    ${admin ? "" : '<button class="ghost small" data-edit>Cámaras</button>'}
-    <button class="ghost small" data-pass>Clave</button>
-    <button class="ghost small" data-del>Borrar</button>`;
+    <span class="aj-uname">${esc(u.username)}</span>
+    <span class="aj-urole"><span class="cw-chip aj-role${admin ? " aj-role--admin" : ""}">${esc(ROLE_LABEL[u.role] || u.role)}</span></span>
+    <span class="aj-ucams">${admin ? "Todas" : n === 1 ? "1 cámara" : `${n} cámaras`}</span>
+    <span class="aj-uacts">
+      ${admin ? "" : '<button type="button" class="cw-btn cw-btn--sm" data-edit aria-expanded="false">Cámaras</button>'}
+      <button type="button" class="cw-btn cw-btn--sm" data-pass>Cambiar clave</button>
+      <button type="button" class="cw-btn cw-btn--sm cw-btn--danger" data-del>Borrar</button>
+    </span>`;
 
   const editBtn = li.querySelector("[data-edit]");
   if (editBtn) editBtn.addEventListener("click", async () => {
     // Un solo contenedor (lista + botón Guardar): plegar lo quita entero y
     // desplegar de nuevo no acumula botones.
     const open = li.querySelector(".rowedit");
-    if (open) { open.remove(); return; }
+    if (open) { open.remove(); editBtn.setAttribute("aria-expanded", "false"); return; }
     if (editBtn.disabled) return;           // ya se está abriendo
     editBtn.disabled = true;
     const wrap = document.createElement("div");
     wrap.className = "rowedit";
     const box = document.createElement("div");
-    box.className = "camchecks";
+    box.className = "aj-camchecks";
     const save = document.createElement("button");
-    save.className = "primary small rowsave"; save.textContent = "Guardar cámaras";
+    save.type = "button";
+    save.className = "cw-btn cw-btn--primary cw-btn--sm rowsave"; save.textContent = "Guardar cámaras";
     wrap.append(box, save);
     try { await buildCamChecks(box, u.cameras); }
     finally { editBtn.disabled = false; }
     li.appendChild(wrap);
+    editBtn.setAttribute("aria-expanded", "true");
     save.addEventListener("click", async () => {
       save.disabled = true;
       try {
@@ -3967,7 +5099,9 @@ function enterZoneKioskChrome() {
   // Ventana dedicada de una zona: sin barras ni controles, solo el mosaico.
   document.body.classList.add("zoneonly");
   const tb = $(".topbar"); if (tb) tb.style.display = "none";
-  const wb = $(".wallbar"); if (wb) wb.style.display = "none";
+  const wb = $(".cw-wallbar"); if (wb) wb.style.display = "none";
+  const wh = $("#wallHint"); if (wh) wh.style.display = "none";
+  const wf = $("#wallFoot"); if (wf) wf.style.display = "none";
   $$(".view").forEach((v) => v.classList.remove("active"));
   const m = $("#view-mosaico"); if (m) m.classList.add("active");
 }

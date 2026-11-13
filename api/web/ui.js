@@ -31,8 +31,89 @@
   // Cada entrada: { el, returnTo }
   const stack = [];
 
+  // ------------------------------------------------------- pantalla completa
+  // Con un elemento en pantalla completa (una teja, el muro o el DVR) nada fuera
+  // de él se ve, y los modales/diálogos viven en <body>: el botón «IA» parecía no
+  // hacer nada. Al abrirse la PRIMERA ventana se sale de pantalla completa
+  // recordando el elemento; al cerrarse la ÚLTIMA se vuelve a entrar en él.
+  // Genérico: vale para todo `.modal`, el login y uiPrompt/uiConfirm.
+  let fsEl = null;            // elemento que estaba en pantalla completa
+  let fsRestoreTimer = null;
+  let fsSwallowUntil = 0;     // hasta cuándo se traga el `fullscreenchange` de SALIDA provocado por esta función
+
+  // app.js reacciona a esa salida apagando el modo «ajustar» y devolviendo la teja
+  // a fotograma; como la salida es temporal, ese evento no debe llegar a app.js.
+  // Captura en window: corre antes que cualquier oyente de document.
+  window.addEventListener("fullscreenchange", (e) => {
+    placeToast();   // primero el aviso: tiene que seguir al elemento aunque el evento se trague
+    if (fsSwallowUntil && performance.now() < fsSwallowUntil && !document.fullscreenElement) {
+      fsSwallowUntil = 0;
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
+  function suspendFullscreen(modal) {
+    clearTimeout(fsRestoreTimer);
+    const cur = document.fullscreenElement;
+    if (!cur || typeof document.exitFullscreen !== "function") return;
+    // Si la ventana está dentro del elemento a pantalla completa (o lo contiene) ya se ve.
+    if (modal && (cur.contains(modal) || modal.contains(cur))) return;
+    fsEl = cur;
+    fsSwallowUntil = performance.now() + 800;
+    document.exitFullscreen().catch(() => { fsSwallowUntil = 0; });
+  }
+
+  function scheduleFullscreenRestore() {
+    clearTimeout(fsRestoreTimer);
+    if (!fsEl) return;
+    // Espera corta: hay flujos que cierran una ventana y abren otra un instante después
+    // (IA → editor de zona, que primero carga un fotograma); así no se entra y sale de
+    // pantalla completa entre ambas. Si la otra tarda más, solo hay un parpadeo.
+    fsRestoreTimer = setTimeout(restoreFullscreen, 350);
+  }
+
+  function restoreFullscreen() {
+    pruneStack();
+    if (stack.length || !fsEl) return;
+    const el = fsEl;
+    fsEl = null;
+    if (!el.isConnected || document.fullscreenElement || typeof el.requestFullscreen !== "function") return;
+    el.requestFullscreen().catch(() => armFullscreenRetry(el));
+  }
+
+  // El navegador exige un gesto reciente para entrar en pantalla completa. Al cerrar
+  // con clic o con Guardar lo hay; con Escape no (no cuenta como activación). Entonces
+  // se reintenta en la siguiente pulsación o clic, durante 20 s.
+  let fsRetryArmed = false;
+  function armFullscreenRetry(el) {
+    if (fsRetryArmed) return;
+    fsRetryArmed = true;
+    const off = () => {
+      fsRetryArmed = false;
+      clearTimeout(timer);
+      document.removeEventListener("pointerdown", onGesture, true);
+      document.removeEventListener("keydown", onGesture, true);
+    };
+    const onGesture = (ev) => {
+      if (ev.type === "keydown" && ev.key === "Escape") return;
+      off();
+      if (el.isConnected && !document.fullscreenElement && !stack.length) {
+        el.requestFullscreen().catch(() => {});
+      }
+    };
+    const timer = setTimeout(off, 20000);
+    document.addEventListener("pointerdown", onGesture, true);
+    document.addEventListener("keydown", onGesture, true);
+  }
+
   function isShown(el) {
     return el.isConnected && !el.hidden && el.getAttribute("aria-hidden") !== "true";
+  }
+
+  // Defensa: una ventana oculta por otra vía (estilo, clase) que no pasó por `hidden`
+  // dejaría una entrada colgada y desactivaría la salida/entrada de pantalla completa.
+  function pruneStack() {
+    for (let i = stack.length - 1; i >= 0; i--) if (!isShown(stack[i].el)) stack.splice(i, 1);
   }
 
   function focusables(el) {
@@ -51,6 +132,23 @@
         el.setAttribute("aria-labelledby", h.id);
       }
     }
+    upgradeCloseButtons(el);
+  }
+
+  // Marco de modales (rediseño): el botón «Cerrar» de la cabecera pasa a ser un
+  // botón de ícono (x) con aria-label. Solo se toca si el texto es exactamente
+  // «Cerrar» y no lleva ya un ícono; los ids y los oyentes del botón no cambian.
+  // «Cancelar» (editor de zona) no se toca: cancela, no cierra.
+  function upgradeCloseButtons(el) {
+    if (typeof icon !== "function") return;
+    el.querySelectorAll(".modalhead [data-modal-close], .modalhead [data-close]").forEach((btn) => {
+      if (btn.querySelector("svg") || btn.textContent.trim() !== "Cerrar") return;
+      btn.classList.remove("ghost", "small");
+      btn.classList.add("cw-ib");
+      btn.setAttribute("aria-label", "Cerrar");
+      btn.title = "Cerrar";
+      btn.innerHTML = icon("x", 18);
+    });
   }
 
   function closeButton(el) {
@@ -64,6 +162,9 @@
   function open(el) {
     if (stack.some((s) => s.el === el)) return;
     ensureAria(el);
+    pruneStack();
+    if (!stack.length) suspendFullscreen(el);
+    else clearTimeout(fsRestoreTimer);
     const prev = document.activeElement;
     stack.push({ el, returnTo: prev instanceof HTMLElement && prev !== document.body ? prev : null });
     // focus() fuerza el cálculo de estilos, no hace falta esperar al pintado
@@ -78,6 +179,7 @@
     const i = stack.findIndex((s) => s.el === el);
     if (i < 0) return;
     const [entry] = stack.splice(i, 1);
+    if (!stack.length) scheduleFullscreenRestore();
     // Solo devolver el foco si el modal cerrado era el de arriba y el foco quedó
     // en él (o se perdió en <body>); si no, otro código ya movió el foco a propósito.
     const active = document.activeElement;
@@ -166,6 +268,72 @@
     (items[0] || top.el).focus({ preventScroll: true });
   });
 
+  // ---------------------------------------------------------------- cabecera
+  // app.js solo cambia la clase de los puntos de estado (dot on/off) y el texto
+  // de #userName; aquí se traduce a texto accesible y a la inicial del avatar.
+  [["dotApi", "Servidor"], ["dotMtx", "Vídeo"]].forEach(([id, base]) => {
+    const dot = document.getElementById(id);
+    if (!dot) return;
+    const sync = () => {
+      const state = dot.classList.contains("on") ? "en línea"
+        : dot.classList.contains("off") ? "sin conexión" : "comprobando";
+      dot.setAttribute("aria-label", `${base}: ${state}`);
+      dot.title = `${base}: ${state}`;
+    };
+    new MutationObserver(sync).observe(dot, { attributes: true, attributeFilter: ["class"] });
+    sync();
+  });
+  const userName = document.getElementById("userName");
+  const avatar = document.querySelector(".usericon");
+  if (userName && avatar) {
+    const syncUser = () => {
+      const name = userName.textContent.trim();
+      avatar.textContent = name ? Array.from(name)[0] : "";
+      const box = document.getElementById("userBox");
+      if (box) box.title = name ? `Sesión de ${name}` : "";
+    };
+    new MutationObserver(syncUser).observe(userName, { childList: true, characterData: true, subtree: true });
+    syncUser();
+  }
+
+  // ---------------------------------------------------------------- avisos (toast)
+  // app.js solo pone el texto y la clase `err`; un error se anuncia con
+  // prioridad (role=alert) y el resto con cortesía (role=status).
+  const toastEl = document.getElementById("toast");
+
+  // Con un elemento en pantalla completa, nada fuera de él se ve, y #toast vive en
+  // <body>: los avisos (p. ej. un error al guardar) no se veían. Mientras haya
+  // pantalla completa, el MISMO #toast (sin clonar: app.js lo busca por id cada vez)
+  // se mueve dentro de ese elemento; al salir, vuelve a <body>. Con la salida
+  // temporal de D12 (ventana abierta sobre pantalla completa) también vuelve a
+  // <body>, que es donde se ve la ventana, y regresa al entrar de nuevo.
+  const TOAST_NO_HOST = /^(VIDEO|AUDIO|IMG|CANVAS|IFRAME|OBJECT|EMBED|SVG|INPUT|SELECT|TEXTAREA|BUTTON)$/;
+  let toastHostObserver = null;
+  function placeToast() {
+    if (!toastEl) return;
+    const cur = document.fullscreenElement;
+    // Los elementos que no pintan hijos (<video>, <img>…) y <body>/<html> no sirven de anfitrión.
+    const host = cur && cur !== document.body && cur !== document.documentElement &&
+      !TOAST_NO_HOST.test(cur.tagName.toUpperCase()) ? cur : document.body;
+    if (toastEl.parentNode !== host) host.appendChild(toastEl);
+    if (toastHostObserver) { toastHostObserver.disconnect(); toastHostObserver = null; }
+    if (host !== document.body) {
+      // Si app.js reescribe los hijos del anfitrión (p. ej. rehace la teja), el aviso se recoloca.
+      toastHostObserver = new MutationObserver(() => { if (toastEl.parentNode !== host) placeToast(); });
+      toastHostObserver.observe(host, { childList: true });
+    }
+  }
+
+  if (toastEl) {
+    const syncToast = () => {
+      const err = toastEl.classList.contains("err");
+      toastEl.setAttribute("role", err ? "alert" : "status");
+      toastEl.setAttribute("aria-live", err ? "assertive" : "polite");
+    };
+    new MutationObserver(syncToast).observe(toastEl, { attributes: true, attributeFilter: ["class"] });
+    syncToast();
+  }
+
   // ---------------------------------------------------------------- pestañas
   // app.js cambia la clase `.active`; aquí se refleja en `aria-selected` y se
   // añade el teclado de un tablist (flechas, Inicio, Fin), sin tocar app.js.
@@ -219,12 +387,23 @@
             card.className = "modalcard uicard";
             card.noValidate = true;
 
+            const top = document.createElement("div");
+            top.className = "uitop";
             const msg = document.createElement(input ? "label" : "p");
             msg.className = "uimsg";
             msg.id = msgId;
             msg.textContent = String(message ?? "");
             if (input) msg.htmlFor = fieldId;
-            card.appendChild(msg);
+            // x de cierre (cancela); Escape y el clic en el fondo hacen lo mismo
+            const x = document.createElement("button");
+            x.type = "button";
+            x.className = "cw-ib";
+            x.setAttribute("aria-label", "Cerrar");
+            x.title = "Cerrar";
+            x.setAttribute("data-modal-close", "");
+            x.innerHTML = typeof icon === "function" ? icon("x", 18) : "×";
+            top.append(msg, x);
+            card.appendChild(top);
 
             let field = null;
             if (input) {
@@ -244,12 +423,11 @@
             foot.className = "uibtns";
             const cancel = document.createElement("button");
             cancel.type = "button";
-            cancel.className = "ghost";
+            cancel.className = "cw-btn";
             cancel.textContent = "Cancelar";
-            cancel.setAttribute("data-modal-close", "");
             const ok = document.createElement("button");
             ok.type = "submit";
-            ok.className = danger ? "primary danger" : "primary";
+            ok.className = danger ? "cw-btn cw-btn--danger" : "cw-btn cw-btn--primary";
             ok.textContent = okLabel || "Aceptar";
             // Confirmación: el foco inicial va a Aceptar salvo que sea destructiva,
             // donde cae en Cancelar para que un Enter accidental no borre nada.
@@ -270,7 +448,9 @@
               e.preventDefault();
               finish(input ? field.value : true);
             });
-            cancel.addEventListener("click", () => finish(input ? null : false));
+            const cancelAll = () => finish(input ? null : false);
+            cancel.addEventListener("click", cancelAll);
+            x.addEventListener("click", cancelAll);
             // Clic en el fondo = cancelar (igual que los demás modales).
             root.addEventListener("mousedown", (e) => {
               if (e.target === root) finish(input ? null : false);

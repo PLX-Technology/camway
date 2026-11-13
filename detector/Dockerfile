@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY yolo.py detector.py ./
+COPY yolo.py ppe_two_step.py detector.py ./
 
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "detector.py"]

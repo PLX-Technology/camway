@@ -1,8 +1,8 @@
 'use strict';
 // Vista DVR con MOSAICO DEL SERVIDOR: el servidor compone la cuadrícula y manda
-// UN solo H.264 → el cliente decodifica 1 stream (casi thin-client). Dinámico
-// 4/9/16 + paginado. Doble clic en una celda = maximizar esa cámara (stream
-// directo). Autónoma: no toca el mosaico clásico.
+// UN solo H.264 → el cliente decodifica 1 stream (casi thin-client). Rejilla
+// Auto/1/2×2/3×3/4×4 + paginado. Doble clic (o Intro) en una celda = maximizar esa
+// cámara (stream directo). Autónoma: no toca el mosaico clásico.
 (function () {
   const view = document.getElementById('dvrView');
   if (!view) return;
@@ -10,11 +10,26 @@
   const pager = view.querySelector('#dvrPager');
   const pageLbl = view.querySelector('#dvrPageLbl');
   const titleEl = view.querySelector('#dvrTitle');
+  const countEl = view.querySelector('#dvrCount');
+  const clockEl = view.querySelector('#dvrClock');
+  const segBtns = [...view.querySelectorAll('#dvrSeg [data-layout]')];
 
   let CFG = { layout: 4, page: 0, pages: 1, cols: 2, rows: 2, cells: [], total: 0 };
   let GRIDP = null;     // player del mosaico (1 stream)
   let MAXP = null;      // player de la cámara maximizada (directo)
   let busy = false;
+
+  // Rejilla elegida: "auto" (según el nº de cámaras) o 1/4/9/16 (celdas por página).
+  // Auto: 1 cámara → 1×1, ≤4 → 2×2, ≤9 → 3×3, si no 4×4. Se recuerda en el navegador.
+  let pref = 'auto';
+  try { const p = localStorage.getItem('camway.dvr.layout'); if (['auto', '1', '4', '9', '16'].includes(p)) pref = p; } catch (e) {}
+  function autoLayout(total) { return total <= 1 ? 1 : total <= 4 ? 4 : total <= 9 ? 9 : 16; }
+  function prefLayout() {
+    if (pref !== 'auto') return Number(pref);
+    const known = CFG.total || (typeof state !== 'undefined' && state.tiles ? state.tiles.size : 0);
+    return known ? autoLayout(known) : 4;       // sin dato aún: 4, y se corrige al saber el total
+  }
+  function paintSeg() { segBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.layout === pref))); }
 
   // Reproductor: la clase compartida de whep.js, con la política del DVR. Solo
   // vídeo; el mosaico del servidor tarda unos segundos en montar, así que se
@@ -55,7 +70,7 @@
   }
 
   // --- pide al servidor el mosaico para (layout, page) y lo reproduce ---
-  async function applyMosaic(layout, page) {
+  async function applyMosaic(layout, page, again) {
     if (busy) return; busy = true;
     try {
       let r;
@@ -75,6 +90,11 @@
       }
       try { CFG = await r.json(); }
       catch (e) { stageMessage('Respuesta no válida del servidor.'); return; }
+      // Auto: ahora que se sabe cuántas cámaras hay, se pide la rejilla que toca.
+      if (pref === 'auto' && !again && autoLayout(CFG.total || 0) !== CFG.layout && CFG.total) {
+        busy = false;
+        return await applyMosaic(autoLayout(CFG.total), 0, true);
+      }
       renderStage();
     } finally { busy = false; }
   }
@@ -111,15 +131,20 @@
   function renderStage() {
     if (GRIDP) { GRIDP.stop(); GRIDP = null; }
     const cols = CFG.cols || 2, rows = CFG.rows || 2;
-    // celdas/etiquetas por porcentaje (el mosaico es 16:9 y el stage también)
+    // Celdas por porcentaje (el mosaico es 16:9 y el escenario también). Las que no
+    // tienen cámara se tapan con «Libre» (borde punteado): así no se ve el logo
+    // grande que el servidor dibuja en las celdas vacías.
     let ovl = '';
-    (CFG.cells || []).forEach((c, k) => {
+    for (let k = 0; k < cols * rows; k++) {
+      const c = (CFG.cells || [])[k];
       const x = (k % cols) / cols * 100, y = Math.floor(k / cols) / rows * 100;
-      ovl += `<div class="dvr-pos" style="left:${x}%;top:${y}%;width:${100 / cols}%;height:${100 / rows}%" data-k="${k}">
-        <div class="dvr-load"><img class="dvr-loadimg" src="/static/mark.svg" alt=""></div>
-        <div class="dvr-rec" title="Grabando">●</div>
-        <div class="dvr-name">${esc(c.title || c.host || '')}</div></div>`;
-    });
+      const box = `left:${x}%;top:${y}%;width:${100 / cols}%;height:${100 / rows}%`;
+      if (!c) { ovl += `<div class="dvr-pos dvr-empty" style="${box}"><span>Libre</span></div>`; continue; }
+      const nm = esc(c.title || c.host || '');
+      ovl += `<div class="dvr-pos" style="${box}" data-k="${k}" tabindex="0" role="button" aria-label="Ampliar ${nm}">
+        <div class="dvr-load" aria-hidden="true">${typeof icon === 'function' ? icon('refresh', 26) : ''}</div>
+        <div class="dvr-name"><span class="cw-dot"></span>${nm}</div></div>`;
+    }
     stageWrap.innerHTML = `<div class="dvr-stage loading">
       <video id="dvrMosaicVideo" autoplay playsinline muted></video>
       <div class="dvr-ovl">${ovl}</div></div>`;
@@ -132,15 +157,18 @@
     GRIDP = makePlayer(CFG.whep, vid, null, { onHttpError: mosaicDenied, onLive: resetRearm });
     GRIDP.start();
     // doble clic en una celda → maximizar esa cámara (stream directo)
-    stage.querySelector('.dvr-ovl').addEventListener('dblclick', ev => {
-      const pos = ev.target.closest('.dvr-pos'); if (!pos) return;
-      const c = (CFG.cells || [])[+pos.dataset.k]; if (c && c.whep) maximize(c);
+    const ovlEl = stage.querySelector('.dvr-ovl');
+    const open = pos => { const c = pos && (CFG.cells || [])[+pos.dataset.k]; if (c && c.whep) maximize(c); };
+    ovlEl.addEventListener('dblclick', ev => open(ev.target.closest('.dvr-pos[data-k]')));
+    ovlEl.addEventListener('keydown', ev => {                   // teclado: Intro amplía la celda enfocada
+      if (ev.key === 'Enter') { const pos = ev.target.closest('.dvr-pos[data-k]'); if (pos) { ev.preventDefault(); open(pos); } }
     });
-    pageLbl.textContent = `${(CFG.page || 0) + 1}/${CFG.pages || 1}`;
-    pager.style.display = (CFG.pages || 1) > 1 ? '' : 'none';
-    const n = CFG.total || 0;
-    const site = document.body.dataset.site || '';
-    titleEl.textContent = (site ? site + ' · ' : '') + n + (n === 1 ? ' cámara' : ' cámaras');
+    const pages = CFG.pages || 1, n = CFG.total || 0;
+    pageLbl.textContent = `Página ${(CFG.page || 0) + 1} de ${pages}`;
+    pager.style.display = pages > 1 ? '' : 'none';
+    countEl.textContent = n + (n === 1 ? ' cámara' : ' cámaras');
+    titleEl.textContent = document.body.dataset.site || 'CamWay';
+    paintSeg();
   }
 
   function maximize(c) {
@@ -171,13 +199,25 @@
     catch (e) { return false; }
   }
 
+  // Reloj de la barra (solo mientras el DVR está abierto).
+  let clockTimer = null;
+  function tickClock() {
+    const d = new Date();
+    clockEl.dateTime = d.toISOString();
+    clockEl.textContent = d.toLocaleString('es', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      .replace(',', '').replace(',', ' ·');
+  }
+
   async function openDvr() {
     view.hidden = false;
     document.body.classList.add('dvr-open');
     syncWall();
-    await userApplyMosaic(CFG.layout || 4, 0);
+    tickClock(); clearInterval(clockTimer); clockTimer = setInterval(tickClock, 1000);
+    paintSeg();
+    await userApplyMosaic(prefLayout(), 0);
   }
   function closeDvr() {
+    clearInterval(clockTimer); clockTimer = null;
     resetRearm();
     unmaximize();
     if (GRIDP) { GRIDP.stop(); GRIDP = null; }
@@ -197,7 +237,13 @@
   view.querySelector('#dvrClose').addEventListener('click', closeDvr);
   view.querySelector('#dvrPrev').addEventListener('click', () => { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); });
   view.querySelector('#dvrNext').addEventListener('click', () => { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); });
-  view.querySelector('#dvrLayout').addEventListener('change', e => { userApplyMosaic(parseInt(e.target.value, 10) || 4, 0); });
+  segBtns.forEach(b => b.addEventListener('click', () => {
+    pref = b.dataset.layout;
+    try { localStorage.setItem('camway.dvr.layout', pref); } catch (e) {}
+    paintSeg();
+    userApplyMosaic(prefLayout(), 0);
+  }));
+  view.querySelector('#dvrUnmax').addEventListener('click', unmaximize);
   view.querySelector('#dvrFull').addEventListener('click', () => {
     try { if (document.fullscreenElement) document.exitFullscreen(); else view.requestFullscreen(); } catch (e) {}
   });

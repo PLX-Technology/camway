@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import ipaddress
 import logging
 import os
 import re
@@ -214,7 +215,9 @@ class DetectionHub:
     def __init__(self):
         self.subscribers: set[asyncio.Queue] = set()
         self.latest: dict[str, dict] = {}
-        self.detector_seen: float = 0.0
+        self.detector_seen: float = 0.0       # reloj del event loop (para detector_alive)
+        self.detector_seen_ts: float = 0.0    # hora de pared de la última consulta (para /status)
+        self.models: Optional[set] = None     # modelos que declaró el detector; None = no lo dijo (detector viejo)
 
     def detector_alive(self) -> bool:
         try:
@@ -584,6 +587,8 @@ _KIOSK_USER = {"id": -1, "username": "kiosko", "role": "viewer", "cameras": [], 
 _PUBLIC_EXACT = {"/", "/tv", "/api/health", "/api/me", "/api/login",
                  "/api/logout", "/api/setup"}
 _INTERNAL_PREFIXES = ("/bi/", "/api/detector")
+# Excepción: el panel (cualquier usuario con sesión) consulta si el detector está vivo.
+_DETECTOR_STATUS_PATH = "/api/detector/status"
 
 # Rutas que exigen rol admin.
 _ADMIN_PREFIXES = ("/api/scan", "/api/onvif", "/api/probe", "/api/reprobe",
@@ -591,9 +596,23 @@ _ADMIN_PREFIXES = ("/api/scan", "/api/onvif", "/api/probe", "/api/reprobe",
                    "/api/blueiris", "/api/users")
 
 
+# Subred interna de compose (detector, proxy Blue Iris…). La fija docker-compose.yml
+# y la autoriza mediamtx.yml; se puede cambiar con CAMWAY_INTERNAL_CIDR si en el
+# equipo esa subred ya la usa otra red Docker.
+try:
+    _INTERNAL_NET = ipaddress.ip_network(os.environ.get("CAMWAY_INTERNAL_CIDR", "172.28.0.0/24"), strict=False)
+except ValueError:
+    _INTERNAL_NET = ipaddress.ip_network("172.28.0.0/24")
+
+
 def _client_is_internal(request: Request) -> bool:
     host = request.client.host if request.client else ""
-    return host.startswith("172.28.") or host in ("127.0.0.1", "::1", "localhost")
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host) in _INTERNAL_NET
+    except ValueError:
+        return False
 
 
 # Caché de sesión en memoria: el muro pide fotogramas a 6fps×N cámaras, no se
@@ -645,7 +664,7 @@ async def auth_gate(request: Request, call_next):
     if method == "OPTIONS" or path.startswith("/static/"):
         return await call_next(request)
 
-    if path.startswith(_INTERNAL_PREFIXES):
+    if path.startswith(_INTERNAL_PREFIXES) and path != _DETECTOR_STATUS_PATH:
         if not _client_is_internal(request):
             return JSONResponse({"detail": "solo acceso interno"}, status_code=403)
         return await call_next(request)
@@ -1060,8 +1079,8 @@ async def get_ai(stream_id: str, request: Request):
         raise HTTPException(404, "stream desconocido")
     _require_camera(request, s["device_id"])
     cfg = store.get_ai(request.state.user["id"], stream_id)
-    return cfg or {"enabled": False, "target": "vehiculo", "min_score": 0.4,
-                   "action": "full", "zone": None, "schedule": None}
+    return cfg or {"enabled": False, "target": "vehiculo", "targets": ["vehiculo"],
+                   "min_score": 0.4, "action": "full", "zone": None, "schedule": None}
 
 
 @app.put("/api/streams/{stream_id}/ai")
@@ -1070,6 +1089,10 @@ async def set_ai(stream_id: str, request: Request, payload: dict = Body(...)):
     if not s:
         raise HTTPException(404, "stream desconocido")
     _require_camera(request, s["device_id"])   # viewer puede configurar SU cámara
+    # `targets` (lista) es lo nuevo; `target` (texto) sigue aceptándose para
+    # clientes viejos (app de TV, zone.html). Ver store.normalize_targets.
+    if "targets" in payload and not isinstance(payload["targets"], list):
+        raise HTTPException(400, "'targets' debe ser una lista")
     store.set_ai(request.state.user["id"], stream_id, payload)
     return {"ok": True}
 
@@ -1102,12 +1125,34 @@ async def put_layout(request: Request, payload: dict = Body(...)):
     return {"ok": True}
 
 
+DETECTOR_ONLINE_S = 30.0     # el detector consulta /targets cada ~2 s; sin noticias en 30 s = caído
+
+
+@app.get("/api/detector/status")
+async def detector_status():
+    """¿Está vivo el detector del servidor y qué modelos tiene? Lo usa el modal de IA
+    del panel para decidir «detecta el servidor» o «detecta el navegador».
+    `models`: general = personas/vehículos; epp = sin casco; fuego = fuego/humo.
+    `true` = cargado o con su archivo ya descargado en el detector (puede cargarse
+    al activarlo, sin internet). Cualquier usuario con sesión."""
+    seen = detections.detector_seen_ts
+    online = bool(seen) and (time.time() - seen) < DETECTOR_ONLINE_S
+    declared = detections.models
+    have = set() if not online else (declared if declared is not None else {"general"})
+    return {"online": online, "last_seen": seen or None,
+            "models": {"general": "general" in have, "epp": "epp" in have,
+                       "fuego": "fuego" in have}}
+
+
 @app.get("/api/detector/targets")
-async def detector_targets():
+async def detector_targets(models: str = ""):
     """Cámaras que el detector debe vigilar: las de IA (corre el modelo → alarma)
     y las que GRABAN por evento/híbrido (solo el gate de movimiento → clip). Cada
     target lleva `ai` (correr YOLO) y `record_motion` (emitir movimiento)."""
     detections.detector_seen = asyncio.get_event_loop().time()
+    detections.detector_seen_ts = time.time()
+    # El detector declara qué modelos tiene (?models=general,epp,fuego); uno viejo no manda nada.
+    detections.models = {m.strip() for m in models.split(",") if m.strip()} if models else None
     ai = {t["stream_id"]: t for t in store.enabled_ai()}
     # Cámaras con AVISO por WhatsApp/correo: el detector las vigila aunque
     # ningún usuario haya activado la IA en su navegador.
