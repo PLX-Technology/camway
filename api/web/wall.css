@@ -274,3 +274,43 @@
 #view-mosaico .cw-wallfoot__info { margin-left: auto; }
 #view-mosaico.is-fit .cw-wallfoot, #view-mosaico.is-fit .cw-hint { display: none; }
 @media (max-width: 640px) { #view-mosaico .cw-wallfoot__info { margin-left: 0; width: 100%; } }
+
+/* ------------------------------------------------------------ zonas */
+.cw-zonebar { display: flex; flex-wrap: wrap; gap: 6px; }
+.cw-zonebar[hidden] { display: none; }
+.cw-zonebar .cw-btn[aria-pressed="true"] { background: var(--cw-accent-soft); border-color: #2F4F86; }
+.cw-zonebar .cw-btn__n { color: var(--cw-muted); }
+.cw-zonebar .cw-btn--icon { padding: 0 10px; }
+
+#view-mosaico .zonebox { border: 0; background: transparent; border-radius: 0; overflow: visible; }
+#view-mosaico .zonebox.dragover { outline: 2px dashed var(--cw-accent); outline-offset: 6px; border-radius: var(--cw-radius); box-shadow: none; }
+#view-mosaico .zonehead {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 0 8px; border: 0; background: transparent;
+}
+#view-mosaico .zonehead .zname {
+  width: auto; min-width: 90px; max-width: 240px; padding: 4px 8px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--cw-text); font-weight: 600; font-size: 14px; line-height: 1.2; font-family: inherit;
+}
+#view-mosaico .zonehead .zname:hover { border-color: var(--cw-line); }
+#view-mosaico .zonehead .zname:focus { outline: none; border-color: var(--cw-accent); background: #121821; }
+#view-mosaico .zonehead .zname:focus-visible { outline: 2px solid #7FB0FF; outline-offset: 1px; }
+#view-mosaico .zonehead .zcount { font-size: 12px; color: var(--cw-muted); }
+#view-mosaico .zonehead .zspacer { flex: 1; }
+#view-mosaico .wall--onezone .zonehead { display: none; }
+#view-mosaico .zonegrid:empty::after {
+  content: "Arrastra cámaras aquí"; grid-column: 1 / -1; display: block; text-align: center; padding: 26px;
+  color: #4A5666; font-size: 12px; border: 1px dashed #263140; border-radius: var(--cw-radius);
+}
+
+/* ------------------------------------------------------------ editor de zona */
+#zoneEditor .modalhead { gap: 10px; align-items: center; }
+#zoneEditor .modalhead h3 { font-size: 15px; font-weight: 600; margin: 0; }
+#zoneEditor .zone-headbtns { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+#zoneEditor .cw-hint { margin: 6px 0 10px; }
+#zoneEditor .zonewrap { position: relative; margin: 6px 0; line-height: 0; }
+#zoneEditor #zoneCanvas {
+  max-width: 100%; max-height: 62vh; border: 1px solid var(--cw-line); border-radius: var(--cw-radius); background: #000;
+  cursor: crosshair; touch-action: none;
+}
+#zoneEditor .aifoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+#zoneEditor .zonebtns { display: flex; gap: 8px; }

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zona de detección — CamWay</title>
 <style>
-  :root { --bg:#0b1220; --panel:#111a2e; --line:#29354e; --text:#e5e7eb;
-          --muted:#94a3b8; --accent:#1a4a82; --accent-bright:#2f6fed; }
+  :root { --bg:#0B0F14; --panel:#0E131A; --control:#18202B; --line:#243042; --text:#E6EDF5;
+          --muted:#9AA8B8; --accent:#2F6FED; --accent-bright:#7FB0FF; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
          font:14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -16,13 +16,15 @@
   header h1 { font-size:16px; margin:0; }
   header .who { color:var(--muted); font-size:13px; }
   .spacer { flex:1; }
-  button { padding:8px 14px; border-radius:8px; border:1px solid var(--line);
-           background:var(--panel); color:inherit; cursor:pointer; font-size:14px; }
+  button { height:36px; padding:0 14px; border-radius:10px; border:1px solid var(--line);
+           background:var(--control); color:inherit; cursor:pointer; font-weight:500; font-size:13px; line-height:1; font-family:inherit; }
+  button:hover { border-color:#3A4A60; background:#1E2836; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
-  button.primary:hover { background:#245a9e; }
+  button.primary:hover { background:#3B7BFF; border-color:#3B7BFF; }
+  button:focus-visible { outline:2px solid var(--accent-bright); outline-offset:2px; }
   .wrap { flex:1; display:flex; align-items:center; justify-content:center;
           padding:16px; overflow:auto; }
-  canvas { max-width:100%; max-height:100%; border-radius:10px;
+  canvas { max-width:100%; max-height:100%; border-radius:12px;
            border:1px solid var(--line); background:#000; cursor:crosshair; touch-action:none; }
   .hint { color:var(--muted); font-size:13px; }
   footer { padding:8px 16px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }

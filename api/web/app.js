@@ -1374,9 +1374,9 @@ function makeZoneBox(zone) {
       <input class="zname" spellcheck="false" aria-label="Nombre de la zona">
       <span class="zcount"></span>
       <span class="zspacer"></span>
-      ${isDefault ? "" : '<button class="ghost small" data-zfit title="Cuando está activo, esta zona NO aparece en «Ajustar a pantalla» del monitor principal; solo en su propia ventana.">▦ Solo su ventana</button>'}
-      <button class="ghost small" data-zwin title="Abrir esta zona en una ventana nueva (pantalla dedicada)">⧉ Ventana</button>
-      ${isDefault ? "" : '<button class="ghost small" data-zdel>Eliminar</button>'}
+      ${isDefault ? "" : `<button class="cw-btn cw-btn--sm" type="button" data-zfit aria-pressed="false" title="Cuando está activo, esta zona NO aparece en la pantalla completa del monitor principal; solo en su propia ventana.">${icon("monitor", 14)}<span>Solo su ventana</span></button>`}
+      <button class="cw-btn cw-btn--sm" type="button" data-zwin title="Abrir esta zona en una ventana nueva (pantalla dedicada)">${icon("external", 14)}<span>Ventana</span></button>
+      ${isDefault ? "" : `<button class="cw-btn cw-btn--sm cw-btn--danger" type="button" data-zdel title="Eliminar la zona (sus cámaras pasan a «Sin zona»)">${icon("trash", 14)}<span>Eliminar</span></button>`}
     </div>
     <div class="zonegrid"></div>`;
 
@@ -1398,8 +1398,8 @@ function makeZoneBox(zone) {
   if (fitBtn) {
     const paint = () => {
       const on = box.dataset.fitExclude === "1";
-      fitBtn.classList.toggle("primary", on);
-      fitBtn.textContent = (on ? "✓ " : "▦ ") + "Solo su ventana";
+      fitBtn.classList.toggle("cw-btn--primary", on);
+      fitBtn.setAttribute("aria-pressed", String(on));
     };
     paint();
     fitBtn.addEventListener("click", () => {
@@ -1468,6 +1468,7 @@ function rebuildLayoutFromDom() {
   }
   saveLayout({ zones });
   boxes.forEach(updateZoneCount);
+  applyColumns();                    // recuenta columnas (Auto) y la barra de zonas
 }
 
 function updateZoneCount(box) {
@@ -1485,10 +1486,16 @@ async function addZone() {
   rebuildLayoutFromDom();
 }
 
-function deleteZone(id) {
+async function deleteZone(id) {
   if (id === "default") return;
   const box = $(`.zonebox[data-zone-id="${id}"]`);
   const defBox = $('.zonebox[data-zone-id="default"]');
+  if (box) {
+    const nombre = box.querySelector(".zname").value.trim() || "la zona";
+    const n = box.querySelectorAll(".tile").length;
+    const msg = `¿Eliminar la zona «${nombre}»?` + (n ? ` Sus ${n} cámaras pasan a «Sin zona».` : "");
+    if (!(await uiConfirm(msg, { okLabel: "Eliminar", danger: true }))) return;
+  }
   if (box && defBox) {
     const defGrid = defBox.querySelector(".zonegrid");
     box.querySelectorAll(".tile").forEach((t) => defGrid.appendChild(t));
@@ -1507,6 +1514,46 @@ try {
   if (["auto", "1", "2", "3"].includes(c)) wallCols = c;
 } catch (_) {}
 let selectedStream = null;        // teja seleccionada (borde azul); la que muestra el modo «1»
+let zoneFilter = "all";           // «Todas» o el id de la zona elegida en la barra de zonas
+
+// Barra de zonas (chips): «Todas N · Zona n · +». Solo existe si hay más de una
+// zona. Se reconstruye solo si cambian zonas, nombres o cuentas (así el foco del
+// teclado no se pierde al elegir una).
+function renderZoneBar() {
+  const bar = $("#zoneBar");
+  if (!bar) return;
+  const boxes = $$("#wall .zonebox");
+  if (boxes.length < 2) { bar.hidden = true; bar.dataset.sig = ""; zoneFilter = "all"; return; }
+  if (zoneFilter !== "all" && !boxes.some((b) => b.dataset.zoneId === zoneFilter)) zoneFilter = "all";
+  const zonas = boxes.map((b) => ({
+    id: b.dataset.zoneId, name: b.querySelector(".zname").value.trim() || "Zona",
+    n: b.querySelectorAll(".tile").length,
+  }));
+  const sig = JSON.stringify(zonas);
+  bar.hidden = false;
+  if (bar.dataset.sig !== sig) {
+    bar.dataset.sig = sig;
+    bar.textContent = "";
+    const chip = (id, name, n) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "cw-btn"; b.dataset.zone = id;
+      b.append(name + " ");
+      const c = document.createElement("span");
+      c.className = "cw-btn__n"; c.textContent = String(n);
+      b.append(c);
+      b.addEventListener("click", () => { zoneFilter = id; applyColumns(); });
+      return b;
+    };
+    bar.append(chip("all", "Todas", zonas.reduce((s, z) => s + z.n, 0)));
+    zonas.forEach((z) => bar.append(chip(z.id, z.name, z.n)));
+    const add = document.createElement("button");
+    add.type = "button"; add.className = "cw-btn cw-btn--icon"; add.title = "Nueva zona";
+    add.setAttribute("aria-label", "Nueva zona"); add.innerHTML = icon("plus", 16);
+    add.addEventListener("click", addZone);
+    bar.append(add);
+  }
+  bar.querySelectorAll("[data-zone]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.zone === zoneFilter)));
+}
 
 function autoCols(n) { return n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4; }
 
@@ -1517,9 +1564,13 @@ function paintGridSeg() {
 }
 
 function applyColumns() {
+  renderZoneBar();
   const solo = wallCols === "1";
-  if (solo && !(selectedStream && state.tiles.has(selectedStream))) {
-    selectedStream = $("#wall .tile")?.dataset.streamId || null;   // por defecto, la primera
+  const enFiltro = (el) => zoneFilter === "all" || el.closest(".zonebox")?.dataset.zoneId === zoneFilter;
+  if (solo && !(selectedStream && state.tiles.has(selectedStream) &&
+                enFiltro(state.tiles.get(selectedStream).el))) {
+    // por defecto, la primera de la zona elegida
+    selectedStream = [...$$("#wall .tile")].find(enFiltro)?.dataset.streamId || null;
   }
   state.tiles.forEach((c, sid) => {
     c.el.hidden = solo && sid !== selectedStream;
@@ -1529,8 +1580,11 @@ function applyColumns() {
     const n = [...g.children].filter((t) => t.classList.contains("tile") && !t.hidden).length;
     g.style.setProperty("--cw-cols", solo ? 1 : wallCols === "auto" ? autoCols(n) : Number(wallCols));
     const box = g.closest(".zonebox");
-    if (box) box.hidden = solo && n === 0;
+    if (box) box.hidden = (solo && n === 0) ||
+      (zoneFilter !== "all" && box.dataset.zoneId !== zoneFilter);
   });
+  // con una sola zona («Sin zona») no hace falta su cabecera
+  $("#wall").classList.toggle("wall--onezone", $$("#wall .zonebox").length < 2);
   paintGridSeg();
 }
 

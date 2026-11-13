@@ -496,20 +496,22 @@
   <div class="modalcard zonecard">
     <div class="modalhead">
       <h3 id="zoneModalTitle">Zona de detección — <span id="zoneCamName"></span></h3>
-      <button class="ghost small" id="zoneNewWin" title="Editar en una ventana aparte, más grande">⤢ Ventana nueva</button>
-      <button class="ghost small" id="zoneCancel" data-modal-close>Cancelar</button>
+      <div class="zone-headbtns">
+        <button class="cw-btn cw-btn--sm" id="zoneNewWin" type="button" title="Editar en una ventana aparte, más grande"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg><span>Ventana nueva</span></button>
+        <button class="cw-ib" id="zoneCancel" type="button" data-modal-close title="Cancelar (Esc)" aria-label="Cancelar y volver"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
     </div>
-    <p class="hint">Mantén presionado y <strong>traza</strong> el área donde quieres detectar
+    <p class="cw-hint">Mantén presionado y <strong>traza</strong> el área donde quieres detectar
       (por ejemplo, solo el parking). Fuera de la zona se ignora. Sin zona, se
       detecta en toda la imagen.</p>
     <div class="zonewrap">
-      <canvas id="zoneCanvas"></canvas>
+      <canvas id="zoneCanvas" aria-label="Fotograma de la cámara donde se traza la zona"></canvas>
     </div>
     <div class="aifoot">
-      <span class="hint" id="zoneInfo">Sin zona.</span>
+      <span class="cw-hint" id="zoneInfo" role="status">Sin zona.</span>
       <div class="zonebtns">
-        <button class="ghost" id="zoneClear">Limpiar</button>
-        <button class="primary" id="zoneSave">Guardar zona</button>
+        <button class="cw-btn" id="zoneClear" type="button"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg><span>Limpiar</span></button>
+        <button class="cw-btn cw-btn--primary" id="zoneSave" type="button"><svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg><span>Guardar zona</span></button>
       </div>
     </div>
   </div>
