@@ -195,14 +195,28 @@ async def probe_path(
 
 
 async def get_options(host: str, port: int, timeout: float = DEFAULT_TIMEOUT) -> tuple[bool, str]:
-    """OPTIONS es la forma más barata de saber si hay un RTSP vivo detrás."""
+    """OPTIONS es la forma más barata de saber si hay un RTSP vivo detrás.
+
+    Se pregunta primero con `rtsp://host:port/` (con barra, la forma que usan
+    ffmpeg y VLC): algunos equipos viejos, como las GeoVision, responden
+    400 Bad Request a la URL sin ruta. Si con barra no sale 200/401, se repite
+    sin barra, que es como preguntaba CamWay antes, para no perder ningún equipo
+    que solo acepte esa forma."""
+    alive, server = await _options_once(host, port, f"rtsp://{host}:{port}/", timeout)
+    if alive:
+        return alive, server
+    alive2, server2 = await _options_once(host, port, f"rtsp://{host}:{port}", timeout)
+    return alive2, server2 or server
+
+
+async def _options_once(host: str, port: int, url: str, timeout: float) -> tuple[bool, str]:
     writer = None
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port), timeout=timeout
         )
         req = (
-            f"OPTIONS rtsp://{host}:{port} RTSP/1.0\r\n"
+            f"OPTIONS {url} RTSP/1.0\r\n"
             "CSeq: 1\r\n"
             f"User-Agent: {USER_AGENT}\r\n\r\n"
         )
