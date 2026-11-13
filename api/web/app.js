@@ -1100,7 +1100,9 @@ function startWallFeeds() {
 // ¿Esta teja necesita su vídeo en vivo para la IA del navegador? (con el
 // detector del servidor activo, no: él procesa y el navegador solo recibe SSE.)
 function keepLiveForAi(c) {
-  return !state.serverDetection && !!(c.config && c.config.enabled);
+  // Solo si la IA del navegador tiene algo que vigilar (persona/vehículo): sin casco
+  // y fuego los detecta solo el servidor, y para eso no hace falta vídeo en vivo aquí.
+  return !state.serverDetection && !!(c.config && c.config.enabled) && browserTargets(c.config).length > 0;
 }
 
 // Detiene refresco, gobernadores y WebRTC SIN destruir las tejas. Con el muro
