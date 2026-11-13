@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zona de detección — CamWay</title>
+<style>
+  :root { --bg:#0b1220; --panel:#111a2e; --line:#29354e; --text:#e5e7eb;
+          --muted:#94a3b8; --accent:#1a4a82; --accent-bright:#2f6fed; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+         display:flex; flex-direction:column; height:100vh; }
+  header { display:flex; align-items:center; gap:12px; padding:12px 16px;
+           border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  header .who { color:var(--muted); font-size:13px; }
+  .spacer { flex:1; }
+  button { padding:8px 14px; border-radius:8px; border:1px solid var(--line);
+           background:var(--panel); color:inherit; cursor:pointer; font-size:14px; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.primary:hover { background:#245a9e; }
+  .wrap { flex:1; display:flex; align-items:center; justify-content:center;
+          padding:16px; overflow:auto; }
+  canvas { max-width:100%; max-height:100%; border-radius:10px;
+           border:1px solid var(--line); background:#000; cursor:crosshair; touch-action:none; }
+  .hint { color:var(--muted); font-size:13px; }
+  footer { padding:8px 16px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Zona de detección</h1>
+  <span class="who" id="camName"></span>
+  <span class="spacer"></span>
+  <button id="clear">Limpiar</button>
+  <button class="primary" id="save">Guardar zona</button>
+  <button id="close">Cerrar</button>
+</header>
+<div class="wrap"><canvas id="cv"></canvas></div>
+<footer>Mantén presionado y <strong>traza</strong> el área a vigilar. Fuera de la
+  zona se ignora. La configuración es tuya (por usuario). <span id="status"></span></footer>
+
+<script>
+const qs = new URLSearchParams(location.search);
+const streamId = qs.get("stream");
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let bg = null, pts = [], drawing = false;
+
+function setStatus(t){ document.getElementById("status").textContent = t; }
+
+async function api(path, opts) {
+  const r = await fetch(path, { headers:{"Content-Type":"application/json"}, ...opts });
+  if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.statusText);
+  return r.status === 204 ? null : r.json();
+}
+
+function fitCanvas() {
+  // Ajusta el canvas al tamaño de la imagen escalado al viewport.
+  const maxW = window.innerWidth - 40, maxH = window.innerHeight - 130;
+  const iw = bg ? bg.naturalWidth : 1280, ih = bg ? bg.naturalHeight : 720;
+  const s = Math.min(maxW/iw, maxH/ih, 1.5);
+  cv.width = Math.round(iw*s); cv.height = Math.round(ih*s);
+  redraw();
+}
+
+function redraw() {
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if (bg) ctx.drawImage(bg, 0,0, cv.width, cv.height);
+  else { ctx.fillStyle="#000"; ctx.fillRect(0,0,cv.width,cv.height); }
+  if (pts.length) {
+    ctx.beginPath();
+    pts.forEach(([x,y],i)=> i? ctx.lineTo(x,y): ctx.moveTo(x,y));
+    if (!drawing) ctx.closePath();
+    ctx.fillStyle = "rgba(47,111,237,.25)";
+    ctx.strokeStyle = "#2f6fed"; ctx.lineWidth = 2;
+    ctx.fill(); ctx.stroke();
+  }
+}
+
+function pos(e){
+  const r = cv.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return [ (t.clientX-r.left)*(cv.width/r.width), (t.clientY-r.top)*(cv.height/r.height) ];
+}
+function start(e){ e.preventDefault(); drawing=true; pts=[pos(e)]; redraw(); }
+function move(e){ if(!drawing) return; e.preventDefault(); pts.push(pos(e)); redraw(); }
+function end(){ drawing=false; redraw(); }
+
+cv.addEventListener("mousedown", start); cv.addEventListener("mousemove", move);
+window.addEventListener("mouseup", end);
+cv.addEventListener("touchstart", start, {passive:false});
+cv.addEventListener("touchmove", move, {passive:false});
+window.addEventListener("touchend", end);
+window.addEventListener("resize", fitCanvas);
+
+document.getElementById("clear").addEventListener("click", ()=>{ pts=[]; redraw(); });
+document.getElementById("close").addEventListener("click", ()=> window.close());
+
+document.getElementById("save").addEventListener("click", async ()=>{
+  if (pts.length && pts.length < 3) return setStatus("Traza al menos 3 puntos, o limpia para quitar la zona.");
+  const zone = pts.length >= 3 ? pts.map(([x,y])=>[+(x/cv.width).toFixed(4), +(y/cv.height).toFixed(4)]) : null;
+  try {
+    const cfg = await api(`/api/streams/${streamId}/ai`);   // config actual (por usuario)
+    cfg.zone = zone;
+    await api(`/api/streams/${streamId}/ai`, { method:"PUT", body: JSON.stringify(cfg) });
+    setStatus("Zona guardada.");
+    if (window.opener && !window.opener.closed) {
+      try { window.opener.postMessage({ type:"zone-saved", streamId }, "*"); } catch(_){}
+    }
+  } catch(err){ setStatus("Error: " + err.message); }
+});
+
+(async function init(){
+  if (!streamId) { setStatus("Falta el parámetro stream."); return; }
+  // nombre + config actual
+  try {
+    const cfg = await api(`/api/streams/${streamId}/ai`);
+    if (Array.isArray(cfg.zone) && cfg.zone.length>=3) pts = cfg.zone;  // se re-escala al medir
+  } catch(_){}
+  // fondo: fotograma del muro; si no, snapshot
+  bg = new Image();
+  bg.onload = ()=>{ if (pts.length) pts = pts.map(([x,y])=>[x*cv.width, y*cv.height]); fitCanvas(); };
+  bg.onerror = ()=>{ bg=null; fitCanvas(); setStatus("Sin vista previa de la cámara."); };
+  bg.src = `/api/wall/${streamId}/frame?t=${Date.now()}`;
+  document.getElementById("camName").textContent = qs.get("name") || "";
+})();
+</script>
+</body>
+</html>

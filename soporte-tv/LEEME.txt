@@ -1,0 +1,26 @@
+SOPORTE TV (Android / Google TV por red local)
+================================================
+
+Uso
+  1. Copia esta carpeta a cualquier PC con Windows conectada a la misma red que el TV.
+  2. Doble clic en  soporte.bat   (o  soporte.bat 172.16.10.118  para ir directo a un TV).
+  3. Opcion 1: buscar. Escribe el rango de la red (ej. 172.16.0.0/19) o una IP.
+  Todo lo que genera (capturas, videos, logs) queda en la carpeta  salida\.
+
+Preparar CADA TV (una sola vez, con el control)
+  Ajustes > Sistema > Acerca de > pulsar 7 veces "Compilacion"  (modo desarrollador)
+  Ajustes > Sistema > Opciones de desarrollador > Depuracion por red / USB: ACTIVADA
+  La PRIMERA vez que una PC se conecta, el TV muestra un aviso: marcar "Permitir siempre".
+  Luego esa PC queda autorizada para ese TV.
+
+Vista en vivo (opcional)
+  Descarga scrcpy (github.com/Genymobile/scrcpy/releases) y descomprimelo en  soporte-tv\scrcpy\
+
+Seguridad
+  - Con la depuracion activa, quien llegue al puerto 5555 del TV lo controla por completo.
+    Mantenerlo SOLO en red local; nunca abrir/redirigir el puerto 5555 hacia Internet.
+  - La busqueda se conecta a cada equipo que tenga el puerto 5555 abierto; los que no
+    estan autorizados pueden mostrar en su pantalla el aviso de autorizacion de la PC.
+  - Cada PC genera su propia clave (carpeta .android del usuario). Para no aceptar el
+    aviso en cada TV desde cada PC de soporte, copia adbkey y adbkey.pub de una PC a otra
+    (es una clave que da acceso a todos los TV: guardarla con cuidado).

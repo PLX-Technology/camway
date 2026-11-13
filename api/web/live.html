@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CamWay — En vivo</title>
+<style>
+  :root{ --bg:#0b0d11; --line:#1c222c; --fg:#e7ecf3; --mut:#8b96a7; --acc:#2ad4e0; --bad:#ef4444; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font:14px system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden;user-select:none}
+  /* rejilla: llena la ventana; 2x2 para 4 cámaras, se adapta a más/menos */
+  #grid{position:fixed;inset:0;display:grid;gap:3px;padding:3px;
+    grid-template-columns:repeat(var(--cols,2),1fr);
+    grid-auto-rows:1fr}
+  .cell{position:relative;background:#000;border-radius:6px;overflow:hidden;cursor:pointer}
+  .cell video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
+  .cell .name{position:absolute;left:0;right:0;bottom:0;padding:5px 9px;font-size:13px;font-weight:600;
+    color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.75));pointer-events:none;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cell .state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    color:var(--mut);font-size:13px;gap:10px;flex-direction:column;pointer-events:none}
+  .cell .state.hidden{display:none}
+  .cell .spin{width:38px;height:38px;border-radius:50%;border:3px solid #222c38;border-top-color:var(--acc);
+    animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* maximizado */
+  #max{position:fixed;inset:0;background:#000;z-index:20;display:none}
+  #max.on{display:block}
+  #max video{width:100%;height:100%;object-fit:contain;background:#000}
+  #max .name{position:absolute;left:14px;bottom:12px;font-size:18px;font-weight:700;
+    text-shadow:0 1px 4px #000;pointer-events:none}
+  #max .hint{position:absolute;right:14px;top:12px;font-size:12px;color:var(--mut);
+    background:rgba(0,0,0,.5);padding:4px 9px;border-radius:999px}
+  /* barra flotante discreta */
+  #bar{position:fixed;right:10px;top:8px;z-index:30;display:flex;align-items:center;gap:8px;
+    opacity:.25;transition:opacity .2s}
+  #bar:hover{opacity:1}
+  #bar .st{font-size:12px;color:var(--mut);background:rgba(0,0,0,.5);padding:3px 9px;border-radius:999px}
+  #bar button{border:0;border-radius:8px;background:rgba(255,255,255,.12);color:#fff;
+    width:30px;height:30px;font-size:15px;cursor:pointer}
+  #bar button:hover{background:rgba(255,255,255,.25)}
+  #empty{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px}
+  #empty.on{display:flex}
+  #empty .logo{font-size:30px;font-weight:800}
+  #empty .logo .w{color:var(--acc)}
+  #empty a,#empty button{color:#fff;background:var(--acc);border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer;text-decoration:none}
+  #empty .mut{color:var(--mut);max-width:460px}
+</style>
+</head>
+<body>
+  <div id="grid"></div>
+
+  <div id="max">
+    <video id="max-v" autoplay playsinline muted></video>
+    <div class="name" id="max-name"></div>
+    <div class="hint">clic para volver a la rejilla</div>
+  </div>
+
+  <div id="empty">
+    <div class="logo">Cam<span class="w">Way</span></div>
+    <div class="mut" id="empty-msg">No hay cámaras configuradas todavía.</div>
+    <button id="empty-admin">Agregar cámaras (Administrar)</button>
+  </div>
+
+  <div id="bar">
+    <span class="st" id="st"></span>
+    <button id="btn-admin" title="Administrar / agregar cámaras">⚙</button>
+  </div>
+
+  <script src="/static/live.js"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+# Configuración mínima de MediaMTX para CamWay.
+# Las rutas NO se declaran aquí: la API de CamWay las crea y borra en caliente
+# a través de la API de control del puerto 9997.
+
+logLevel: info
+
+# API de control que usa CamWay para publicar y retirar rutas.
+api: yes
+apiAddress: :9997
+
+# Desde la versión 1.21 la API pide autenticación y de fábrica solo la acepta
+# desde localhost, así que un contenedor vecino recibe 401.
+# En vez de inventar una credencial, se autoriza por origen: la API de control
+# NO se publica al host (ver docker-compose.yml), de modo que solo es accesible
+# desde la red interna de compose, que tiene subred fija.
+authInternalUsers:
+  # Ver el video: anónimo desde donde sea. Es una LAN de vigilancia y el
+  # control de acceso lo pone la red, no MediaMTX.
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+  # Crear y borrar rutas: solo la API de CamWay.
+  - user: any
+    pass:
+    ips: ['127.0.0.1', '::1', '172.28.0.0/24']
+    permissions:
+      - action: api
+      - action: metrics
+
+# RTSP: solo lo usa el transcodificador interno cuando una cámara entrega
+# MJPEG o H.265 y hay que convertirla a H.264 para el navegador.
+rtsp: yes
+rtspAddress: :8554
+
+# WebRTC: la salida real hacia el mosaico.
+webrtc: yes
+webrtcAddress: :8889
+# Un único puerto UDP para todo el tráfico ICE, así basta con publicar uno.
+webrtcLocalUDPAddress: :8189
+
+# HLS queda como respaldo para navegadores donde WebRTC falle.
+# Tiene varios segundos de retardo: sirve para comprobar, no para vigilar.
+hls: yes
+hlsAddress: :8888
+hlsVariant: lowLatency
+
+rtmp: no
+srt: no
+
+# Servidor de playback: extrae tramos del material grabado por rango de tiempo.
+# CamWay lo usa internamente para recortar los clips de evento desde el continuo
+# (no se publica al host; solo accesible por la red interna de compose).
+playback: yes
+playbackAddress: :9996
+
+paths: {}

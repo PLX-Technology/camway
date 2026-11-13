@@ -1,0 +1,62 @@
+# ---- Secretos y configuración local (NUNCA al repositorio) ----
+.env
+*.env
+!.env.example
+local.properties
+*.jks
+*.keystore
+*.pfx
+*.pem
+*.key
+config/
+admin-inicial.txt
+
+# ---- Datos de ejecución ----
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+rec/
+recordings/
+logs/
+*.log
+
+# ---- Salida de compilación (se regenera) ----
+build/
+build_*/
+build-tmp/
+dist/
+dist_*/
+*/dist/
+*/build/
+.gradle/
+.idea/
+*.class
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+
+# ---- Binarios y paquetes (pesados; no son código) ----
+*.exe
+*.apk
+*.aab
+*.zip
+*.7z
+*.msi
+*.mp4
+*.mkv
+*.avi
+
+# ---- Dependencias de terceros que se descargan aparte ----
+# windows/vendor/ffmpeg.exe y mediamtx.exe: bajarlos de sus sitios oficiales (ver README) antes de empaquetar.
+windows/vendor/
+soporte-tv/adb/
+
+# ---- Sistema ----
+Thumbs.db
+desktop.ini
+.DS_Store

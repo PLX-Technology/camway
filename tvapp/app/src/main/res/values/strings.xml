@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CamWay TV</string>
+    <string name="setup_sub">Conectar al servidor de cámaras</string>
+    <string name="hint_ip">IP del servidor (ej. 192.168.1.50)</string>
+    <string name="hint_port">Puerto (por defecto 8120)</string>
+    <string name="hint_user">Usuario</string>
+    <string name="hint_pass">Contraseña</string>
+    <string name="save">Guardar y ver cámaras</string>
+    <string name="setup_tip">Para cambiar el servidor luego: mantén pulsado ATRÁS en el control (o la tecla Menú).</string>
+</resources>

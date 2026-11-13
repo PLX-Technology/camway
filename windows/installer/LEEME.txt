@@ -1,0 +1,60 @@
+CamWay para Windows - instalador (todo incluido)
+=================================================
+
+Instala CamWay en el PC del taladro SIN que tengas que instalar nada mas:
+no necesita Docker, ni Python, ni descargar programas. Todo viene dentro de este paquete
+(servidor CamWay, MediaMTX y ffmpeg con SRT y H.264).
+
+REQUISITOS
+  - Windows 10 o mas nuevo, de 64 bits.
+  - 2 GB libres en el disco (mas lo que ocupen las grabaciones).
+  - Para ver las camaras desde el Command Center: salida a Internet (Starlink sirve).
+
+INSTALAR (5 minutos)
+  1. Descomprime TODO este paquete (clic derecho > Extraer todo), por ejemplo en el Escritorio.
+  2. Si vas a ver las camaras desde el Command Center, copia en la misma carpeta el archivo
+     camway-relay-<taladro>.env  (se genera en el Command Center: Administracion > Video >
+     "Paquete de conexion"). El instalador lo detecta solo.
+  3. Doble clic en  Instalar-CamWay.bat  (acepta el aviso de administrador).
+  4. Responde las dos preguntas de red (Enter acepta lo propuesto):
+       - que IP usar, si el equipo tiene varias redes;
+       - en que segmento estan las camaras.
+  5. Espera el resumen. Si todo sale en verde, abre http://localhost:8120
+     La primera vez te pide crear el usuario administrador.
+
+QUE HACE EL INSTALADOR
+  - Verifica que el paquete no este danado (firmas SHA-256).
+  - Detiene una version anterior de CamWay y migra sus datos (camaras, usuarios) SIN borrar los originales.
+  - Instala en C:\CamWay y guarda la clave que cifra las contrasenas de las camaras.
+  - Abre el firewall solo para la red local.
+  - Crea la tarea "CamWay Supervisor": arranca con Windows (aunque nadie inicie sesion), reinicia
+    lo que se caiga y tambien lo que deje de responder.
+  - Prueba la conexion con el Command Center, incluido un video de prueba por SRT.
+
+DESPUES DE INSTALAR
+  1. En CamWay: Escanear el segmento (o agregar las camaras a mano) y Publicar cada una.
+  2. En el Command Center: Administracion > Video: asigna cada camara a su taladro.
+  3. Para tiempo real, en las camaras Dahua usa el boton del rayo (keyframe de 1 s).
+
+ACTUALIZAR A UNA VERSION NUEVA
+  Descomprime el paquete nuevo y ejecuta Instalar-CamWay.bat otra vez. Conserva todo (datos,
+  configuracion, clave de cifrado, relevo).
+
+SI ALGO FALLA
+  - C:\CamWay\diagnostico.ps1 (clic derecho > Ejecutar con PowerShell): muestra el estado y guarda
+    un resumen en diagnostico.txt para mandarlo a soporte.
+  - Registros en C:\CamWay\logs\  (supervisor.log, camway-server.err.log, mediamtx.err.log).
+  - Windows puede mostrar "SmartScreen"/"Windows protegio su PC" al abrir el .bat: pulsa "Mas informacion" >
+    "Ejecutar de todas formas". Es normal: el paquete no esta firmado digitalmente.
+  - Si el aviso final dice que no se pudo enviar video por SRT: la red de este equipo bloquea la salida
+    UDP al puerto 8890 del servidor. Hay que permitirla en el router/firewall del taladro.
+
+CARPETAS (en C:\CamWay)
+  data\    base de datos (camaras, usuarios)   NO borrar
+  rec\     grabaciones
+  config\  camway.env (IP, segmento, clave de cifrado, relevo)   NO compartir: tiene claves
+  logs\    registros
+
+DESINSTALAR
+  Desinstalar-CamWay.bat (conserva los datos). Para borrar tambien los datos:
+  powershell -ExecutionPolicy Bypass -File C:\CamWay\uninstall.ps1 -BorrarDatos

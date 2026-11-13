@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#05070C"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:padding="28dp">
+
+        <ImageView
+            android:layout_width="wrap_content"
+            android:layout_height="72dp"
+            android:layout_marginTop="8dp"
+            android:adjustViewBounds="true"
+            android:src="@drawable/banner"
+            android:contentDescription="@string/app_name" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="18dp"
+            android:text="@string/setup_sub"
+            android:textColor="#8AA0C0"
+            android:textSize="16sp" />
+
+        <RadioGroup
+            android:id="@+id/sourceGroup"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp"
+            android:orientation="horizontal">
+            <RadioButton
+                android:id="@+id/sourceServer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="24dp"
+                android:text="Servidor CamWay"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:checked="true" />
+            <RadioButton
+                android:id="@+id/sourceManual"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cámaras manuales"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp" />
+        </RadioGroup>
+
+        <Button
+            android:id="@+id/manualBtn"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="18dp"
+            android:background="@drawable/btn_tv"
+            android:textColor="#FFFFFF"
+            android:padding="14dp"
+            android:text="Cámaras manuales (agregar / buscar en la red)" />
+
+        <EditText
+            android:id="@+id/ip"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_ip"
+            android:inputType="text"
+            android:textColorHint="#5B6B86"
+            android:textSize="22sp"
+            android:nextFocusDown="@+id/port" />
+
+        <EditText
+            android:id="@+id/port"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="@string/hint_port"
+            android:text="8120"
+            android:inputType="number"
+            android:textColorHint="#5B6B86"
+            android:textSize="22sp"
+            android:nextFocusDown="@+id/user" />
+
+        <EditText
+            android:id="@+id/user"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="@string/hint_user"
+            android:inputType="text"
+            android:textColorHint="#5B6B86"
+            android:textSize="22sp"
+            android:nextFocusDown="@+id/pass" />
+
+        <EditText
+            android:id="@+id/pass"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="@string/hint_pass"
+            android:inputType="textPassword"
+            android:textColorHint="#5B6B86"
+            android:textSize="22sp"
+            android:nextFocusDown="@+id/save" />
+
+        <Button
+            android:id="@+id/save"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/btn_tv"
+            android:textColor="#FFFFFF"
+            android:padding="14dp"
+            android:text="@string/save"
+            android:textSize="20sp" />
+
+        <Button
+            android:id="@+id/autostart"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/btn_tv"
+            android:textColor="#FFFFFF"
+            android:padding="14dp"
+            android:text="Inicio automático al encender" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/setup_tip"
+            android:textColor="#5B6B86"
+            android:textSize="14sp"
+            android:gravity="center" />
+    </LinearLayout>
+</ScrollView>

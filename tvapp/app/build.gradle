@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.pacific.camwaytv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.pacific.camwaytv"
+        minSdk 21
+        targetSdk 34
+        versionCode 33
+        versionName "4.1"
+        ndk {
+            // ABIs que cubren prácticamente todos los Android TV reales.
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        // media3 marca su API RTSP como @UnstableApi; la usamos a propósito.
+        disable 'UnsafeOptInUsageError'
+    }
+}
+
+dependencies {
+    // libVLC: solo para reproducir las GRABACIONES (MP4) del servidor.
+    implementation 'org.videolan.android:libvlc-all:3.6.0'
+    // ExoPlayer (Media3): reproduce el VIVO por RTSP vía MediaCodec, baja latencia.
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-rtsp:1.4.1'
+}

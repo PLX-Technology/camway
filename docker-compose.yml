@@ -1,0 +1,248 @@
+services:
+
+  api:
+    build: ./api
+    container_name: camway-api
+    restart: unless-stopped
+    ports:
+      - "8120:8000"
+    environment:
+      CAMWAY_MTX_API: http://mediamtx:9997
+      # Esta URL la abre el NAVEGADOR, no el contenedor: tiene que ser una
+      # dirección que el navegador alcance.
+      CAMWAY_MTX_WEBRTC: http://${HOST_IP}:8889
+      CAMWAY_DEFAULT_CIDR: ${SCAN_CIDR}
+      CAMWAY_DB: /data/camway.db
+      # Cifra en reposo las credenciales de cámaras guardadas en SQLite. Sin
+      # fijarla, el sistema funciona igual pero genera una clave al vuelo en
+      # cada arranque — útil para no bloquear la instalación, pero significa
+      # que las credenciales quedan ilegibles si el contenedor se recrea
+      # (no solo se reinicia) sin haberla fijado aquí. Generar una con:
+      # python -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+      CAMWAY_SECRET_KEY: ${CAMWAY_SECRET_KEY:-}
+      # Fluidez del mosaico por fotogramas (JPEG/seg por cámara). Subirlo NO
+      # reproduce el lag viejo (eso era decodificar 25 vídeos WebRTC); aquí solo
+      # añade codificación JPEG, barata. Límite práctico ~5-6 fps.
+      CAMWAY_WALL_FPS: ${WALL_FPS:-3}
+      # Carpeta de grabaciones (compartida con MediaMTX, que es quien graba).
+      CAMWAY_RECORD_DIR: /rec
+      # --- Perfil TALADRO (se activan por .env; defaults = comportamiento normal) ---
+      # Mosaico SIEMPRE en vivo (WebRTC), nunca fotogramas: fluidez 100%.
+      CAMWAY_MOSAIC_MODE: ${MOSAIC_MODE:-auto}
+      # Sin audio en el transcode (el DVR da pcm_mulaw con DTS erráticos).
+      CAMWAY_NO_AUDIO: ${NO_AUDIO:-}
+      # wallcache nunca tira directo al DVR (evita el deadlock de slots).
+      CAMWAY_WALL_NO_DIRECT: ${WALL_NO_DIRECT:-}
+      # Grabación continua FORZADA en TODAS las cámaras + retención (días).
+      CAMWAY_RECORD_ALL: ${RECORD_ALL:-}
+      CAMWAY_RECORD_ALL_DAYS: ${RECORD_ALL_DAYS:-7}
+      CAMWAY_MOSAIC_LOGLEVEL: ${MOSAIC_LOGLEVEL:-warning}
+      # --- Avisos fuera de pantalla (foto por WhatsApp/correo). Todo opcional:
+      # sin estas variables el canal queda "no configurado" y no se envía nada.
+      CAMWAY_SITE_NAME: ${SITE_NAME:-Taladro}
+      CAMWAY_EVO_URL: ${EVO_URL:-}
+      CAMWAY_EVO_KEY: ${EVO_KEY:-}
+      CAMWAY_EVO_INSTANCE: ${EVO_INSTANCE:-}
+      CAMWAY_EVO_API: ${EVO_API:-auto}
+      CAMWAY_ALERT_GROUP: ${ALERT_GROUP:-}
+      CAMWAY_SMTP_HOST: ${SMTP_HOST:-}
+      CAMWAY_SMTP_PORT: ${SMTP_PORT:-587}
+      CAMWAY_SMTP_USER: ${SMTP_USER:-}
+      CAMWAY_SMTP_PASS: ${SMTP_PASS:-}
+      CAMWAY_SMTP_FROM: ${SMTP_FROM:-}
+      CAMWAY_SMTP_TLS: ${SMTP_TLS:-starttls}
+      CAMWAY_ALERT_EMAILS: ${ALERT_EMAILS:-}
+      # Hora local (Venezuela). Marca grabaciones, playback y logs en horario
+      # del sitio en vez de UTC. Esta imagen SÍ trae zoneinfo, así que TZ basta.
+      TZ: America/Caracas
+      # Resumen de salud del equipo (Ajustes): lee el Netdata del anfitrión.
+      CAMWAY_NETDATA_URL: ${NETDATA_URL:-http://host.docker.internal:19999}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - camway-data:/data
+      - /etc/localtime:/etc/localtime:ro
+      - ${CAMWAY_REC_DIR:-camway-rec}:/rec
+    depends_on:
+      - mediamtx
+    # Sin tope, un pico de carga (reconciliación tras un apagón, muchas
+    # cámaras a la vez) puede dejar que este contenedor consuma toda la RAM
+    # del host y tumbe a los demás por OOM. 768m quedaba MUY justo: el ffmpeg
+    # del mosaico (~480MB) + los productores de fotogramas lo dejaban al borde
+    # del OOM. Subido a 1536m (el host tiene de sobra). Ajustar con >~30 cámaras.
+    mem_limit: 1536m
+    cpus: 2.5
+
+  mediamtx:
+    # La variante -ffmpeg es obligatoria: sin ella no se pueden transcodificar
+    # las cámaras MJPEG o H.265, que WebRTC no admite tal cual.
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: camway-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8889:8889"       # WebRTC / WHEP
+      - "8888:8888"       # HLS (respaldo)
+      - "8554:8554"       # RTSP (reenvío interno del transcodificador)
+      - "8189:8189/udp"   # multiplexor ICE: sin esto el video no llega
+      # El puerto 9997 (API de control) NO se publica a proposito: crear y
+      # borrar rutas queda solo al alcance de la red interna de compose.
+    environment:
+      # Con red bridge, MediaMTX solo ve su IP interna y la anuncia como
+      # candidata ICE; el navegador no la alcanza. Hay que declararle la IP
+      # real del host.
+      MTX_WEBRTCADDITIONALHOSTS: ${HOST_IP}
+      # Hora local (Venezuela): los nombres de los segmentos .mp4 los pone
+      # MediaMTX con SU hora local. OJO: la imagen -ffmpeg NO trae la base
+      # zoneinfo, así que TZ solo no resuelve (cae a UTC) — por eso se monta
+      # /usr/share/zoneinfo del host más abajo. Sin eso, graba en UTC.
+      TZ: America/Caracas
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+      # Grabaciones (opt-in por cámara). Por defecto un volumen Docker; para
+      # usar un SSD dedicado, define CAMWAY_REC_DIR=/mnt/tu-ssd en el .env.
+      - ${CAMWAY_REC_DIR:-camway-rec}:/rec
+    # La transcodificación ffmpeg por cámara (MJPEG/H.265→H.264) es lo que
+    # más varía con el número de cámaras; sin tope puede comerse toda la RAM
+    # del host. Ajustar si hay más de ~30 cámaras transcodificadas a la vez.
+    mem_limit: 1536m
+    cpus: 2.5
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9997/v3/config/global/get"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  detector:
+    build: ./detector
+    container_name: camway-detector
+    restart: unless-stopped
+    environment:
+      CAMWAY_API: http://api:8000
+      CAMWAY_YOLO_URL: ${CAMWAY_YOLO_URL:-https://huggingface.co/deepghs/yolos/resolve/main/yolov8n/model.onnx}
+      CAMWAY_YOLO_PATH: /model/yolov8n.onnx
+      # Fotogramas/seg que ANALIZA la IA (NO afecta el video en vivo, que va por
+      # otra tubería). En el taladro bajar a 2 vía .env: suficiente para "sin
+      # casco" y deja los núcleos libres para grabación/mosaico.
+      CAMWAY_ANALYZE_FPS: ${ANALYZE_FPS:-3}
+      CAMWAY_YOLO_THREADS: "3"
+      # Modelo de EPP (persona sin casco). Se baja solo si una cámara activa "epp".
+      CAMWAY_PPE_URL: ${CAMWAY_PPE_URL:-https://huggingface.co/fiacecson20/cctv-ai-ppe/resolve/main/best.onnx}
+      CAMWAY_PPE_PATH: /model/ppe.onnx
+      CAMWAY_PPE_CONF: ${PPE_CONF:-0.35}
+      TZ: America/Caracas
+    volumes:
+      - camway-model:/model
+    depends_on:
+      - api
+    # Inferencia YOLO por CPU: con varias cámaras analizadas a la vez puede
+    # crecer bastante. Tope para que un pico no tumbe a los demás contenedores.
+    mem_limit: 1024m
+    cpus: 2
+
+  # Conector IMOU Open API (opcional): trae una cámara IMOU "solo nube" por su
+  # API y la empuja como RTSP local a MediaMTX. Solo arranca si hay credenciales.
+  imou:
+    build: ./imou
+    container_name: camway-imou
+    restart: unless-stopped
+    environment:
+      IMOU_APP_ID: ${IMOU_APP_ID:-}
+      IMOU_APP_SECRET: ${IMOU_APP_SECRET:-}
+      IMOU_DEVICE_ID: ${IMOU_DEVICE_ID:-}
+      IMOU_DEVICE_CODE: ${IMOU_DEVICE_CODE:-}
+      IMOU_CHANNEL_ID: ${IMOU_CHANNEL_ID:-0}
+      IMOU_STREAM_ID: ${IMOU_STREAM_ID:-0}
+      IMOU_MTX_PATH: ${IMOU_MTX_PATH:-imou-office}
+      IMOU_BASE: ${IMOU_BASE:-https://openapi.easy4ip.com/openapi}
+    depends_on:
+      - mediamtx
+    profiles: ["imou"]
+    mem_limit: 256m
+    cpus: 0.5
+
+  # WhatsApp para los avisos con foto (opcional, perfil "alertas"). Evolution
+  # API v2: la v1.8.x trae un cliente de WhatsApp viejo que ya NO logra vincular
+  # dispositivos ("no se puede vincular el dispositivo"). La v2 exige PostgreSQL
+  # (evo-db, solo para la sesión/instancias; no guarda mensajes) y no usa Redis.
+  # Solo la API de CamWay lo alcanza (red interna); al host se publica únicamente
+  # en 127.0.0.1 para sacar el QR. Activar con COMPOSE_PROFILES=alertas en .env.
+  evo-db:
+    image: postgres:16-alpine
+    container_name: camway-evo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVO_DB_PASS:-}
+      POSTGRES_DB: evolution
+    volumes:
+      - evo-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    profiles: ["alertas"]
+    mem_limit: 256m
+    cpus: 0.5
+
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: camway-evolution
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8085:8080"
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: "8080"
+      SERVER_URL: http://evolution:8080
+      CORS_ORIGIN: "*"
+      LOG_LEVEL: ERROR,WARN
+      LOG_COLOR: "false"
+      DEL_INSTANCE: "false"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVO_DB_PASS:-}@evo-db:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: camway
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      RABBITMQ_ENABLED: "false"
+      SQS_ENABLED: "false"
+      WEBSOCKET_ENABLED: "false"
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      CONFIG_SESSION_PHONE_CLIENT: CamWay
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: "30"
+      AUTHENTICATION_API_KEY: ${EVO_KEY:-}
+      TZ: America/Caracas
+    volumes:
+      - evolution-instances:/evolution/instances
+    depends_on:
+      evo-db:
+        condition: service_healthy
+    profiles: ["alertas"]
+    mem_limit: 1024m
+    cpus: 1
+
+volumes:
+  camway-data:
+  camway-model:
+  camway-rec:
+  evolution-instances:
+  evo-db-data:
+
+networks:
+  # Subred fija: mediamtx.yml autoriza su API de control por rango de origen,
+  # asi que no puede depender de la que Docker asigne cada vez.
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
