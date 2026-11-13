@@ -685,6 +685,18 @@ def _user_allows(request: Request, device_id: str) -> bool:
     return device_id in set(u.get("cameras") or [])
 
 
+def _stream_by_route(name: str) -> Optional[dict]:
+    """Stream cuya ruta de MediaMTX es `name`, con la MISMA regla con la que se
+    arma el mosaico (`_published_cams`): `mtx_name` o, si está vacío, safe_name(id)."""
+    s = store.stream_by_mtx(name)
+    if s:
+        return s
+    for cand in store.streams():
+        if (cand["mtx_name"] or safe_name(cand["id"])) == name:
+            return cand
+    return None
+
+
 def _sees_all(request: Request) -> bool:
     """Admin y kiosko local ven todas las cámaras."""
     return _user_sees_all(getattr(request.state, "user", None))
@@ -1196,8 +1208,10 @@ async def whep_offer(name: str, request: Request):
             if not names:
                 raise HTTPException(404, "mosaico no armado")
             for n in names:
-                s = store.stream_by_mtx(n)
-                if s and not _user_allows(request, s["device_id"]):
+                s = _stream_by_route(n)
+                # Falla CERRADO: un nombre que no resuelve a ninguna cámara
+                # conocida no se deja pasar (podría ser una cámara ajena).
+                if not s or not _user_allows(request, s["device_id"]):
                     raise HTTPException(403, "el mosaico actual incluye cámaras que no tienes asignadas")
     else:
         # La ruta auxiliar del substream es "<primario>__lo": para el permiso se
@@ -2235,7 +2249,7 @@ async def talk_ws(ws: WebSocket, stream_id: str):
         return
     # Auth por cookie (el middleware HTTP no corre en WebSockets).
     user = store.session_user(ws.cookies.get(COOKIE_NAME, ""))
-    if not user or (user["role"] != "admin" and s["device_id"] not in set(user.get("cameras") or [])):
+    if not user or not (_user_sees_all(user) or s["device_id"] in set(user.get("cameras") or [])):
         await ws.close(code=4403)
         return
     cfg = _talk_cfg(s["device_id"])

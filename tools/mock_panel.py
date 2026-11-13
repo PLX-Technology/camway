@@ -1149,7 +1149,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.error(404, "mosaico no armado")
             for n in m["names"]:
                 _dev, s = find_stream(n)
-                if s and not user_allows(self.user, _dev["id"]):
+                if not s or not user_allows(self.user, _dev["id"]):      # falla cerrado
                     return self.error(403, "el mosaico actual incluye cámaras que no tienes asignadas")
         return self.error(404, "sin vídeo en el servidor de prueba (WHEP no disponible)")
 
