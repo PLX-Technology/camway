@@ -163,7 +163,8 @@
     if (GRIDP) GRIDP.start();
   }
 
-  function pauseWall(p) { try { document.getElementById(p ? 'btnWallStop' : 'btnWallStart')?.click(); } catch (e) {} }
+  // El muro de app.js se detiene solo mientras body.dvr-open esté puesto.
+  function syncWall() { try { window.CamWayWall && window.CamWayWall.sync(); } catch (e) {} }
 
   async function hasCams() {
     try { const d = await (await fetch('/api/wall', { cache: 'no-store' })).json(); return (d.tiles || []).some(t => t.whep); }
@@ -171,9 +172,9 @@
   }
 
   async function openDvr() {
-    pauseWall(true);
     view.hidden = false;
     document.body.classList.add('dvr-open');
+    syncWall();
     await applyMosaic(CFG.layout || 4, 0);
     clearInterval(watchTimer);
     watchTimer = setInterval(() => { if (GRIDP) GRIDP.watch(); if (MAXP) MAXP.watch(); }, 1000);
@@ -188,7 +189,7 @@
     view.hidden = true;
     document.body.classList.remove('dvr-open');
     try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
-    pauseWall(false);
+    syncWall();
   }
 
   async function autoStart() { if (await hasCams()) openDvr(); }

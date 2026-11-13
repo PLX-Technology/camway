@@ -197,12 +197,14 @@ $$(".tab").forEach((tab) => {
     $$(".view").forEach((v) => v.classList.remove("active"));
     tab.classList.add("active");
     $(`#view-${tab.dataset.view}`).classList.add("active");
-    if (tab.dataset.view === "mosaico") loadWall();
+    if (tab.dataset.view === "mosaico") enterWallView();
     if (tab.dataset.view === "grabaciones") loadRecDevices();
     if (tab.dataset.view === "ajustes") {
       if (isAdmin()) { loadUsers(); fillKiosk(); loadEncoding(); loadHealth(); }
       loadAlertPanel();
     }
+    // Fuera de la pestaña Mosaico el muro se detiene (sin fotogramas ni WebRTC).
+    if (tab.dataset.view !== "mosaico") syncWall();
   });
 });
 
@@ -781,17 +783,77 @@ class WhepPlayer {
   }
 }
 
-async function loadWall(autostart = true) {
+// ---- ciclo de vida del muro ----
+// El muro corre (fotogramas, WebRTC, gobernadores) SOLO si se ve: pestaña
+// Mosaico activa, DVR cerrado y sin «Pausar» manual. syncWall() deriva ese
+// estado y arranca o detiene; se llama desde la navegación, el DVR
+// (window.CamWayWall.sync) y los botones, así no hay carreras entre ellos.
+let wallGen = 0;              // generación de loadWall: descarta respuestas viejas
+let wallRunning = false;      // hay refresco / vídeo corriendo ahora
+let wallUserPaused = false;   // «Pausar» pulsado a mano
+let wallSig = null;           // firma de las tejas del último loadWall
+
+// ¿El muro está tapado (otra pestaña o DVR abierto)? Nada debe pedir imagen.
+function wallOffscreen() {
+  return document.body.classList.contains("dvr-open") ||
+    !$("#view-mosaico")?.classList.contains("active");
+}
+
+function startWallFeeds() {
+  if (liveMosaic) startLiveMosaic();
+  else startSnapRefresh();
+}
+
+// Detiene refresco, gobernadores y WebRTC SIN destruir las tejas.
+function suspendWall() {
+  wallRunning = false;
+  stopSnapRefresh();
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (qTimer) { clearInterval(qTimer); qTimer = null; }
+  state.tiles.forEach((c) => dropLive(c));
+}
+
+function resumeWall() {
+  wallRunning = true;
+  startWallFeeds();
+  const big = enlargedCtrl();       // una ampliada (p. ej. por alarma) vuelve a vídeo
+  if (big) goLive(big);
+}
+
+function syncWall() {
+  const want = state.tiles.size > 0 && !wallUserPaused && !wallOffscreen();
+  if (want && !wallRunning) resumeWall();
+  else if (!want && wallRunning) suspendWall();
+}
+
+// Al volver a la pestaña Mosaico: si las cámaras no cambiaron, solo se reanuda
+// (las tejas siguen montadas); si cambiaron o nunca cargó bien, se reconstruye.
+async function enterWallView() {
+  wallUserPaused = false;
+  if (wallSig === null) return loadWall();
+  try {
+    const d = await api("/api/wall");
+    if (JSON.stringify(d.tiles) !== wallSig) return loadWall();
+  } catch (_) { /* sin red: se reanuda con lo que hay */ }
+  syncWall();
+}
+window.CamWayWall = { sync: syncWall };   // lo usa dvr.js al abrir/cerrar
+
+async function loadWall() {
+  const gen = ++wallGen;
+  wallUserPaused = false;           // recargar reanuda, como siempre
   let data;
   try {
     data = await api("/api/wall");
   } catch (err) {
     return toast(err.message, true);
   }
+  if (gen !== wallGen) return;      // otra carga más reciente tomó el relevo
 
   // Traer la disposición del usuario desde el servidor la primera vez (persiste
   // entre equipos). Luego saveLayout mantiene la caché al día.
   if (serverLayout === null) await fetchLayout();
+  if (gen !== wallGen) return;
 
   // El navegador refresca los fotogramas al ritmo que produce el servidor.
   // Ritmo de poll = el del servidor. En modo ligero NO se topa: la máquina
@@ -804,6 +866,7 @@ async function loadWall(autostart = true) {
     : "MediaMTX no responde: el mosaico no podrá conectar.";
   $("#emptyWall").hidden = data.tiles.length > 0;
 
+  wallSig = JSON.stringify(data.tiles);
   stopWall();
   const wall = $("#wall");
   wall.innerHTML = "";
@@ -833,6 +896,7 @@ async function loadWall(autostart = true) {
   //    corre el modelo; recibe las detecciones por SSE.
   try { state.serverDetection = (await api("/api/health")).detector; } catch (_) {}
   await applyServerConfigs();
+  if (gen !== wallGen) return;
   openDetectionStream();
   startAlarmSweeper();
 
@@ -844,10 +908,7 @@ async function loadWall(autostart = true) {
   liveMosaic = def === "live" ||
     (def === "auto" && data.tiles.length > 0 && data.tiles.length <= LIVE_MOSAIC_MAX);
   applyMosaicModeBtn();
-  if (autostart) {
-    if (liveMosaic) startLiveMosaic();
-    else startSnapRefresh();
-  }
+  syncWall();     // arranca solo si el muro se ve (no bajo otra pestaña ni el DVR)
 }
 
 // Mosaico en vivo: todas las tejas a vídeo WebRTC (substream ligero); al
@@ -1456,7 +1517,10 @@ function toggleFullscreen(el) {
 }
 
 function stopWall() {
+  wallRunning = false;
   stopSnapRefresh();
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (qTimer) { clearInterval(qTimer); qTimer = null; }
   state.players.forEach((p) => p.stop());
   state.players.clear();
   state.tiles.forEach((c) => aiEngine.unregister(c));
@@ -1552,15 +1616,15 @@ document.addEventListener("click", (e) => {
   });
 });
 
-$("#btnWallStart").addEventListener("click", () => { if (liveMosaic) startLiveMosaic(); else startSnapRefresh(); });
+$("#btnWallStart").addEventListener("click", () => {
+  wallUserPaused = false;
+  if (wallRunning) startWallFeeds();   // ya corría: reinicia el ritmo
+  else syncWall();
+});
 $("#btnWallStop").addEventListener("click", () => {
-  stopSnapRefresh();
-  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-  // Pausa de verdad: corta el WebRTC aunque estemos en mosaico en vivo.
-  state.tiles.forEach((c) => {
-    if (c.live) { c.live = false; c.videoReady = false;
-      c.el.classList.remove("live", "videoready"); c.player.stop(); }
-  });
+  // Pausa de verdad: corta fotogramas y WebRTC aunque estemos en mosaico en vivo.
+  wallUserPaused = true;
+  syncWall();
 });
 
 $("#cols").addEventListener("change", applyColumns);
@@ -1986,7 +2050,7 @@ function refDims(ctrl) {
 // sigue visible y refrescándose hasta que el vídeo tiene su primer frame, para
 // que no haya pantalla negra durante el arranque de WebRTC.
 function goLive(ctrl) {
-  if (ctrl.live) return;
+  if (ctrl.live || wallOffscreen()) return;   // con el muro tapado no se abre vídeo
   ctrl.live = true;
   ctrl.videoReady = false;
   ctrl.el.classList.add("live");
@@ -2024,12 +2088,18 @@ function goSnap(ctrl) {
     return;
   }
   if (!ctrl.live) return;
+  dropLive(ctrl);
+  bumpSnap(ctrl);   // refresca el fotograma de inmediato al volver
+}
+
+// Corta el vídeo WebRTC de una teja y la deja en modo fotograma (sin pedir uno).
+function dropLive(ctrl) {
+  if (!ctrl.live && !ctrl.player.active) return;
   ctrl.live = false;
   ctrl.videoReady = false;
   ctrl.el.classList.remove("live", "videoready");
   ctrl.player.stop();
   ctrl.el.querySelector(".tilestate")?.classList.add("oculto");
-  bumpSnap(ctrl);   // refresca el fotograma de inmediato al volver
 }
 
 // ---------------- refresco del mosaico por fotogramas ----------------
@@ -2040,6 +2110,7 @@ let snapTimer = null;
 
 function bumpSnap(ctrl) {
   if (ctrl.videoReady) return;   // el vídeo ya tomó el relevo; no refrescar
+  if (wallOffscreen()) return;   // muro tapado (otra pestaña / DVR): sin peticiones
   const img = ctrl.snap;
   if (!img || !img.isConnected) return;  // teja no colocada (kiosco): no cuenta
   qAtt++;
@@ -2219,11 +2290,11 @@ function stopSnapRefresh() {
 // Al volver a la pestaña (el navegador frena los temporizadores en segundo
 // plano), reanudar el refresco del mosaico automáticamente — sin F5 ni Reanudar.
 document.addEventListener("visibilitychange", () => {
-  const enMosaico = $("#view-mosaico")?.classList.contains("active");
-  if (document.visibilityState === "visible" && enMosaico && state.tiles.size) {
-    if (liveMosaic) startLiveMosaic();
-    else startSnapRefresh();
-  }
+  if (document.visibilityState !== "visible") return;
+  // Solo si el muro debe estar corriendo: con el DVR abierto o en otra pestaña
+  // NO se revive (antes arrancaba debajo del DVR).
+  if (wallRunning && !wallOffscreen() && !wallUserPaused) startWallFeeds();
+  else syncWall();
 });
 
 // ---------------- zoom digital (solo en la vista ampliada/pantalla completa) ----------------
@@ -3748,6 +3819,8 @@ function enterZoneKioskChrome() {
   await loadSettings();
   if (!ZONE_ONLY && isAdmin()) { await loadDevices(); loadUsers(); }
   if (!ZONE_ONLY) loadAlertPanel();
+  // Primero se decide si arranca el DVR (autoStart marca body.dvr-open antes de
+  // volver); luego se carga el muro, que solo corre si no hay DVR encima.
+  if (!ZONE_ONLY) await window.CamWayDVR?.autoStart?.();
   loadWall();                          // el mosaico (el servidor filtra por permiso)
-  if (!ZONE_ONLY) window.CamWayDVR?.autoStart?.();   // arrancar en vista DVR si hay cámaras
 })();
