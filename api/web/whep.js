@@ -23,8 +23,10 @@
  *     fallbackAfter  0         tras N reintentos llama a onFallback(player); si
  *                              devuelve true no se sigue reintentando WebRTC (HLS
  *                              de respaldo en tv.js)
- *     onHttpError(status, player)  si devuelve true, el error HTTP del POST WHEP
- *                              lo gestiona quien llama y NO se reintenta solo
+ *     onHttpError(status, player, detail)  si devuelve true, el error HTTP del
+ *                              POST WHEP lo gestiona quien llama y NO se reintenta
+ *                              solo; detail = texto del error del servidor (el
+ *                              «detail» del JSON, o el cuerpo recortado)
  *   })
  *
  *   start()          conecta (reinicia el contador de reintentos)
@@ -126,6 +128,7 @@ class WhepPlayer {
       if (!res.ok) {
         const e = new Error(`WHEP ${res.status}`);
         e.status = res.status;
+        e.detail = await this._errorDetail(res);
         throw e;
       }
       // URL de la sesión: hay que hacerle DELETE al cerrar, si no MediaMTX
@@ -139,12 +142,20 @@ class WhepPlayer {
     } catch (err) {
       if (!this.active) return;
       if (err && err.status && this.opts.onHttpError &&
-          this.opts.onHttpError(err.status, this) === true) {
+          this.opts.onHttpError(err.status, this, err.detail || "") === true) {
         this._teardownPc();       // lo gestiona quien llama: sin reintento automático
         return;
       }
       this._scheduleReconnect();
     }
+  }
+
+  // Texto del error de una respuesta no-OK (JSON {"detail": …} o cuerpo recortado).
+  async _errorDetail(res) {
+    try {
+      const t = await res.text();
+      try { return String(JSON.parse(t).detail || ""); } catch (_) { return t.slice(0, 200); }
+    } catch (_) { return ""; }
   }
 
   // La conexión se da por buena: se reinicia el contador y arranca el watchdog.

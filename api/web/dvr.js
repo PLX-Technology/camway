@@ -21,6 +21,7 @@
   // reintenta RÁPIDO al inicio para engancharlo apenas esté listo.
   function dvrRetry(n) { return n <= 12 ? 500 : n <= 20 ? 2000 : 8000; }
   function makePlayer(whep, video, stateEl, extra) {
+    const onLive = extra && extra.onLive;
     const setState = txt => {
       if (!stateEl) return;
       stateEl.textContent = txt || '';
@@ -36,7 +37,7 @@
       // se congela: a los 12 s intenta reanudar el <video>; a los 20 s reconecta
       watchdog: { everyMs: 1000, replayMs: 12000, stallMs: 20000, minStep: 0.02 },
       onState: (st, n) => {
-        if (st === 'live') setState('');
+        if (st === 'live') { setState(''); if (onLive) onLive(); }
         else if (st === 'novideo') setState('sin video');
         else if (st === 'offline') setState(n > 20 ? 'sin señal' : 'conectando…');
         else setState('conectando…');
@@ -46,18 +47,65 @@
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+  // Mensaje en lugar del mosaico (error del servidor, permisos…). role=alert para
+  // que los lectores de pantalla lo anuncien; reutiliza .dvr-state del CSS.
+  function stageMessage(text) {
+    if (GRIDP) { GRIDP.stop(); GRIDP = null; }
+    stageWrap.innerHTML = `<div class="dvr-stage"><div class="dvr-state" role="alert">${esc(text)}</div></div>`;
+  }
+
   // --- pide al servidor el mosaico para (layout, page) y lo reproduce ---
   async function applyMosaic(layout, page) {
     if (busy) return; busy = true;
     try {
-      const r = await fetch('/api/mosaic', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ layout, page })
-      });
-      CFG = await r.json();
-    } catch (e) { busy = false; return; }
-    renderStage();
-    busy = false;
+      let r;
+      try {
+        r = await fetch('/api/mosaic', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ layout, page })
+        });
+      } catch (e) { stageMessage('No se pudo contactar con el servidor.'); return; }
+      if (!r.ok) {
+        // 403 «no tienes cámaras asignadas», 401 sesión caducada…: se muestra el
+        // texto del servidor y NO se abre el reproductor.
+        let detail = '';
+        try { detail = (await r.json()).detail || ''; } catch (e) {}
+        stageMessage(detail || ('El servidor respondió ' + r.status + '.'));
+        return;
+      }
+      try { CFG = await r.json(); }
+      catch (e) { stageMessage('Respuesta no válida del servidor.'); return; }
+      renderStage();
+    } finally { busy = false; }
+  }
+
+  // --- el mosaico del servidor es UNO para todos (un solo ffmpeg): lo arma quien
+  // llamó último a POST /api/mosaic, con SUS cámaras. Si otra persona lo armó con
+  // cámaras que yo no tengo, /whep/mosaico responde 403 (o 404 «mosaico no armado»).
+  // No se reintenta en bucle: se rearma UNA vez el mío y, si vuelve el 403 (dos
+  // personas alternando), se espera 5 s, 10 s, 20 s… y se explica en pantalla.
+  const REARM_BASE_MS = 5000, REARM_MAX_MS = 30000;
+  let rearmTries = 0, rearmTimer = null;
+
+  function resetRearm() { rearmTries = 0; clearTimeout(rearmTimer); rearmTimer = null; }
+
+  // Acción del usuario (abrir, página, cuadrícula): empieza de cero.
+  function userApplyMosaic(layout, page) { resetRearm(); return applyMosaic(layout, page); }
+
+  function mosaicDenied(status, player, detail) {
+    if (player !== GRIDP) return false;            // solo el del mosaico
+    const foreign = status === 403;
+    const notArmed = status === 404 && /no armado/i.test(detail || '');
+    if (!foreign && !notArmed) return false;       // p. ej. el ffmpeg montándose: reintento normal
+    if (rearmTries === 0) { rearmTries = 1; applyMosaic(CFG.layout, CFG.page); return true; }
+    const wait = Math.min(REARM_BASE_MS * 2 ** (rearmTries - 1), REARM_MAX_MS);
+    rearmTries++;
+    stageMessage((foreign
+      ? 'Otra persona está usando el mosaico con otras cámaras.'
+      : 'El mosaico todavía no está armado.') + ' Reintentando en ' + Math.round(wait / 1000) + ' s…');
+    clearTimeout(rearmTimer);
+    rearmTimer = setTimeout(() => { rearmTimer = null; if (!view.hidden) applyMosaic(CFG.layout, CFG.page); }, wait);
+    return true;
   }
 
   function renderStage() {
@@ -81,7 +129,7 @@
     const load = on => stage.classList.toggle('loading', on);
     vid.addEventListener('playing', () => load(false));
     ['waiting', 'stalled', 'emptied'].forEach(ev => vid.addEventListener(ev, () => load(true)));
-    GRIDP = makePlayer(CFG.whep, vid, null);
+    GRIDP = makePlayer(CFG.whep, vid, null, { onHttpError: mosaicDenied, onLive: resetRearm });
     GRIDP.start();
     // doble clic en una celda → maximizar esa cámara (stream directo)
     stage.querySelector('.dvr-ovl').addEventListener('dblclick', ev => {
@@ -127,9 +175,10 @@
     view.hidden = false;
     document.body.classList.add('dvr-open');
     syncWall();
-    await applyMosaic(CFG.layout || 4, 0);
+    await userApplyMosaic(CFG.layout || 4, 0);
   }
   function closeDvr() {
+    resetRearm();
     unmaximize();
     if (GRIDP) { GRIDP.stop(); GRIDP = null; }
     // NO se detiene el mosaico del servidor al cerrar: se deja CALIENTE para que
@@ -146,9 +195,9 @@
 
   document.getElementById('btnDvr')?.addEventListener('click', openDvr);
   view.querySelector('#dvrClose').addEventListener('click', closeDvr);
-  view.querySelector('#dvrPrev').addEventListener('click', () => { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); applyMosaic(CFG.layout, p); });
-  view.querySelector('#dvrNext').addEventListener('click', () => { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); applyMosaic(CFG.layout, p); });
-  view.querySelector('#dvrLayout').addEventListener('change', e => { applyMosaic(parseInt(e.target.value, 10) || 4, 0); });
+  view.querySelector('#dvrPrev').addEventListener('click', () => { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); });
+  view.querySelector('#dvrNext').addEventListener('click', () => { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); });
+  view.querySelector('#dvrLayout').addEventListener('change', e => { userApplyMosaic(parseInt(e.target.value, 10) || 4, 0); });
   view.querySelector('#dvrFull').addEventListener('click', () => {
     try { if (document.fullscreenElement) document.exitFullscreen(); else view.requestFullscreen(); } catch (e) {}
   });
@@ -161,7 +210,7 @@
   document.addEventListener('keydown', e => {
     if (view.hidden) return;
     if (e.key === 'Escape') { view.classList.contains('maxed') ? unmaximize() : closeDvr(); }
-    else if (e.key === 'ArrowRight') { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); applyMosaic(CFG.layout, p); }
-    else if (e.key === 'ArrowLeft') { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); applyMosaic(CFG.layout, p); }
+    else if (e.key === 'ArrowRight') { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); }
+    else if (e.key === 'ArrowLeft') { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); }
   });
 })();
