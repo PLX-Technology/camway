@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS ai_config (
     stream_id  TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
     enabled    INTEGER DEFAULT 0,
     target     TEXT DEFAULT 'vehiculo',
+    targets    TEXT,
     min_score  REAL DEFAULT 0.4,
     action     TEXT DEFAULT 'full',
     zone       TEXT,
@@ -119,6 +120,60 @@ def verify_password(pwd: str, stored: str) -> bool:
         return False
 
 
+# Objetivos de la IA por cámara. `ambos` (valor viejo de `target`) = persona + vehículo.
+AI_TARGETS = ("persona", "vehiculo", "epp", "fuego")
+_DEFAULT_TARGETS = ["vehiculo"]
+
+
+def normalize_targets(targets=None, target=None) -> list:
+    """Lista canónica de objetivos de una config de IA.
+
+    - `targets` (lista) manda si trae algún valor válido (se descartan los
+      desconocidos y los repetidos; el orden es el de AI_TARGETS).
+    - Si no, se traduce el `target` viejo: `ambos` → [persona, vehiculo]; un
+      valor válido → [ese]; cualquier otra cosa → [vehiculo] (el valor por defecto).
+    """
+    if isinstance(targets, (list, tuple, set)):
+        found = {t for t in targets if t in AI_TARGETS}
+        if found:
+            return [t for t in AI_TARGETS if t in found]
+    if target == "ambos":
+        return ["persona", "vehiculo"]
+    if target in AI_TARGETS:
+        return [target]
+    return list(_DEFAULT_TARGETS)
+
+
+def legacy_target(targets: list) -> str:
+    """Valor del campo `target` para clientes viejos (p. ej. la app de TV): un solo
+    objetivo → ese; persona+vehículo → `ambos`; si hay más mezclados, `ambos` cuando
+    están persona y vehículo y, si no, el primero."""
+    t = set(targets)
+    if len(targets) == 1:
+        return targets[0]
+    if {"persona", "vehiculo"} <= t:
+        return "ambos"
+    return targets[0] if targets else _DEFAULT_TARGETS[0]
+
+
+def _ai_row_to_cfg(row) -> dict:
+    """Fila de ai_config → dict de la API: `targets` siempre presente y `target`
+    en su forma de compatibilidad."""
+    cfg = dict(row)
+    cfg["enabled"] = bool(cfg["enabled"])
+    cfg["zone"] = json.loads(cfg["zone"]) if cfg["zone"] else None
+    cfg["schedule"] = json.loads(cfg["schedule"]) if cfg["schedule"] else None
+    stored = None
+    if cfg.get("targets"):
+        try:
+            stored = json.loads(cfg["targets"])
+        except (ValueError, TypeError):
+            stored = None
+    cfg["targets"] = normalize_targets(stored, cfg.get("target"))
+    cfg["target"] = legacy_target(cfg["targets"])
+    return cfg
+
+
 class Store:
     def __init__(self, path: str = DB_PATH):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -166,6 +221,10 @@ class Store:
         if cols and "user_id" not in cols:
             self.conn.execute("DROP TABLE ai_config")
             self.conn.executescript(_SCHEMA)
+        if cols and "user_id" in cols and "targets" not in cols:
+            # Varios objetivos por cámara (JSON). Las filas viejas quedan en NULL
+            # y se traducen desde `target` al leerlas (ver normalize_targets).
+            self.conn.execute("ALTER TABLE ai_config ADD COLUMN targets TEXT")
         dcols = [r[1] for r in self.conn.execute("PRAGMA table_info(devices)")]
         if dcols and "bi_camera" not in dcols:
             self.conn.execute("ALTER TABLE devices ADD COLUMN bi_camera TEXT DEFAULT ''")
@@ -489,24 +548,23 @@ class Store:
                 (user_id, stream_id)).fetchone()
         if not row:
             return None
-        cfg = dict(row)
-        cfg["enabled"] = bool(cfg["enabled"])
-        cfg["zone"] = json.loads(cfg["zone"]) if cfg["zone"] else None
-        cfg["schedule"] = json.loads(cfg["schedule"]) if cfg["schedule"] else None
-        return cfg
+        return _ai_row_to_cfg(row)
 
     def set_ai(self, user_id: int, stream_id: str, cfg: dict) -> None:
+        # `targets` (lista) es lo nuevo; `target` sigue valiendo para clientes viejos.
+        targets = normalize_targets(cfg.get("targets"), cfg.get("target"))
         with self._lock:
             self.conn.execute(
                 """INSERT INTO ai_config
-                   (user_id, stream_id, enabled, target, min_score, action, zone, schedule)
-                   VALUES (?,?,?,?,?,?,?,?)
+                   (user_id, stream_id, enabled, target, targets, min_score, action, zone, schedule)
+                   VALUES (?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(user_id, stream_id) DO UPDATE SET
                      enabled=excluded.enabled, target=excluded.target,
+                     targets=excluded.targets,
                      min_score=excluded.min_score, action=excluded.action,
                      zone=excluded.zone, schedule=excluded.schedule""",
                 (user_id, stream_id, int(bool(cfg.get("enabled"))),
-                 cfg.get("target", "vehiculo"), float(cfg.get("min_score", 0.4)),
+                 legacy_target(targets), json.dumps(targets), float(cfg.get("min_score", 0.4)),
                  cfg.get("action", "full"),
                  json.dumps(cfg.get("zone")) if cfg.get("zone") else None,
                  json.dumps(cfg.get("schedule")) if cfg.get("schedule") else None),
@@ -520,10 +578,7 @@ class Store:
                 "SELECT * FROM ai_config WHERE user_id = ?", (user_id,)).fetchall()
         out = {}
         for r in rows:
-            cfg = dict(r)
-            cfg["enabled"] = bool(cfg["enabled"])
-            cfg["zone"] = json.loads(cfg["zone"]) if cfg["zone"] else None
-            cfg["schedule"] = json.loads(cfg["schedule"]) if cfg["schedule"] else None
+            cfg = _ai_row_to_cfg(r)
             out[cfg["stream_id"]] = cfg
         return out
 
@@ -533,18 +588,23 @@ class Store:
         el modelo de fuego). Una sola corrida por cámara; emite cajas crudas."""
         with self._lock:
             rows = self.conn.execute(
-                """SELECT a.stream_id, s.url,
-                          GROUP_CONCAT(DISTINCT a.target) AS targets
+                """SELECT a.stream_id, s.url, a.target, a.targets
                    FROM ai_config a JOIN streams s ON s.id = a.stream_id
-                   WHERE a.enabled = 1
-                   GROUP BY a.stream_id, s.url"""
+                   WHERE a.enabled = 1"""
             ).fetchall()
-        out = []
+        # Unión por cámara de los objetivos de TODOS los usuarios que la tienen
+        # activada (cada config puede traer varios; `ambos` ya viene traducido).
+        by_stream: dict[str, dict] = {}
         for r in rows:
-            d = dict(r)
-            d["targets"] = (d.get("targets") or "").split(",") if d.get("targets") else []
-            out.append(d)
-        return out
+            try:
+                stored = json.loads(r["targets"]) if r["targets"] else None
+            except (ValueError, TypeError):
+                stored = None
+            d = by_stream.setdefault(r["stream_id"], {"stream_id": r["stream_id"],
+                                                      "url": r["url"], "targets": set()})
+            d["targets"].update(normalize_targets(stored, r["target"]))
+        return [dict(d, targets=[t for t in AI_TARGETS if t in d["targets"]])
+                for d in by_stream.values()]
 
     # ---------------- ajustes ----------------
 

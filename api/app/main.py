@@ -1075,8 +1075,8 @@ async def get_ai(stream_id: str, request: Request):
         raise HTTPException(404, "stream desconocido")
     _require_camera(request, s["device_id"])
     cfg = store.get_ai(request.state.user["id"], stream_id)
-    return cfg or {"enabled": False, "target": "vehiculo", "min_score": 0.4,
-                   "action": "full", "zone": None, "schedule": None}
+    return cfg or {"enabled": False, "target": "vehiculo", "targets": ["vehiculo"],
+                   "min_score": 0.4, "action": "full", "zone": None, "schedule": None}
 
 
 @app.put("/api/streams/{stream_id}/ai")
@@ -1085,6 +1085,10 @@ async def set_ai(stream_id: str, request: Request, payload: dict = Body(...)):
     if not s:
         raise HTTPException(404, "stream desconocido")
     _require_camera(request, s["device_id"])   # viewer puede configurar SU cámara
+    # `targets` (lista) es lo nuevo; `target` (texto) sigue aceptándose para
+    # clientes viejos (app de TV, zone.html). Ver store.normalize_targets.
+    if "targets" in payload and not isinstance(payload["targets"], list):
+        raise HTTPException(400, "'targets' debe ser una lista")
     store.set_ai(request.state.user["id"], stream_id, payload)
     return {"ok": True}
 
