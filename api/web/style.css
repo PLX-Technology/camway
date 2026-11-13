@@ -25,6 +25,8 @@ body {
 }
 
 code { font-family: "Cascadia Code", Consolas, monospace; font-size: .92em; }
+a { color: #7aa7ff; }   /* el azul por defecto no se lee sobre fondo oscuro (2,5:1) */
+a:hover { color: #a8c5ff; }
 
 /* ---------------------------------------------------------- barra superior */
 .topbar {
@@ -483,13 +485,6 @@ button.primary.danger:hover:not(:disabled) { background: #d0342b; }
 }
 .toast.err { border-color: var(--bad); color: #ffb3ae; }
 
-@media (max-width: 640px) {
-  .topbar { gap: 12px; }
-  .tabs { width: 100%; margin-left: 0; }
-  .view { padding: 14px; }
-  .devices { grid-template-columns: 1fr; }
-}
-
 /* ---------------- login / setup ---------------- */
 .authoverlay {
   position: fixed; inset: 0; z-index: 100;
@@ -749,3 +744,107 @@ button.primary.danger:hover:not(:disabled) { background: #d0342b; }
 .hscont th, .hscont td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
 .hscont th { color: var(--muted); font-weight: 600; }
 .hsstat-ok { color: var(--ok); } .hsstat-warn { color: var(--warn); } .hsstat-bad { color: var(--bad); }
+
+/* ---------------------------------------------------------- pantallas chicas */
+/* Un modal alto (p. ej. el de IA) hace scroll dentro de su tarjeta en vez de salirse. */
+.modalcard { max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow-y: auto; }
+.zonehead, .modalhead { flex-wrap: wrap; gap: 8px; }
+.copyfield code { min-width: 0; }
+/* Las barras de botones se parten en vez de desbordar, en cualquier ancho */
+.field.actions { flex-wrap: wrap; }
+.tilebar { flex-wrap: wrap; row-gap: 4px; }
+.tilebar .t { flex: 1 1 60px; }
+.toast { max-width: calc(100vw - 24px); }
+
+/* Táctil: objetivos de al menos ~40 px */
+@media (pointer: coarse) {
+  button, .tab, summary { min-height: 40px; }
+  button.small { padding: 8px 12px; }
+  .days button { width: 40px; height: 40px; }
+  .dvr-btn { width: 40px; height: 34px; }
+  .ptzpad { grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(3, 34px); }
+  input[type=checkbox] { width: 20px; height: 20px; }
+}
+
+@media (max-width: 640px) {
+  /* barra superior: marca + estado arriba, pestañas desplazables debajo */
+  .topbar { gap: 8px 12px; padding: 8px 12px; }
+  .brand { order: 1; min-width: 0; }
+  .health { order: 2; margin-left: auto; }
+  .tabs {
+    order: 3; width: 100%; margin-left: 0; gap: 2px;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: 0 0 auto; padding: 8px 14px; }
+  .brandlogo { height: 32px; max-width: 120px; }
+  .sitebadge { max-width: 150px; font-size: 12px; }
+  .userbox { margin-left: 4px; }
+
+  .view { padding: 12px; }
+  .devices { grid-template-columns: 1fr; }
+  .cardtitle { flex-wrap: wrap; }
+  .panel { padding: 14px; }
+  .scanbar, .wallbar { padding: 12px; gap: 12px; }
+
+  /* un 16px evita que iOS haga zoom al enfocar un campo */
+  input, select { font-size: 16px; }
+
+  /* barras de botones: se reparten en 2 columnas en vez de desbordar */
+  .field.actions { width: 100%; }
+  .field.actions > button { flex: 1 1 calc(50% - 4px); }
+  .field.narrow { width: 100%; }
+  .singlerow input[type=text], .singlerow input[type=number] { flex: 1 1 100%; width: auto; }
+  .singlerow button { flex: 1 1 calc(50% - 4px); }
+  .userform > * { flex: 1 1 100%; }
+  .authrow { flex-wrap: wrap; }
+  .authrow input[type=text] { width: auto; }
+
+  /* mosaico */
+  .zonegrid { grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); padding: 8px; gap: 8px; }
+  .tilebar { padding: 6px 8px; }
+
+  /* grabaciones */
+  .recbar { margin: 12px 0; padding: 12px; }
+  .recbar .field, .recbar select, .recbar input, .ts-trigger, .thumbselect { width: 100%; min-width: 0; }
+  .recbar > button { width: 100%; }
+  .ts-menu { width: 100%; }
+  .recgrid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); padding: 0 0 20px; gap: 10px; }
+
+  /* ajustes: una columna */
+  .settingsgrid { grid-template-columns: 1fr; }
+  .hsgrid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .camchecks { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .copyfield { flex-direction: column; align-items: stretch; }
+  .copyfield button { align-self: flex-end; }
+  .recfields { grid-template-columns: 1fr; }
+  .hscont th, .hscont td { padding: 4px; }
+
+  /* modales a pantalla completa (los diálogos de ui.js se quedan centrados) */
+  .modal { padding: 0; align-items: stretch; }
+  .modal .modalcard, .modal .zonecard, .modal .recplayercard {
+    width: 100%; max-width: none; max-height: none; height: 100%;
+    border-radius: 0; border-width: 0; padding: 14px;
+  }
+  .modal.uidialog { padding: 16px; align-items: center; }
+  .modal.uidialog .uicard {
+    width: 100%; height: auto; max-height: calc(100dvh - 32px);
+    border-radius: var(--radius); border-width: 1px;
+  }
+  #zoneCanvas { max-height: 55vh; }
+  #recVideo { max-height: 55vh; }
+  .waqr img { width: min(260px, 100%); height: auto; aspect-ratio: 1; }
+  .wacode { font-size: 22px; letter-spacing: 4px; }
+  .aigrid { gap: 10px; }
+  .timerow { flex-wrap: wrap; }
+
+  /* login */
+  .authcard { padding: 20px; }
+
+  /* vista DVR */
+  .dvr-bar { gap: 6px; padding: 4px 8px; }
+  .dvr-title { display: none; }
+  .dvr-sel { max-width: 118px; font-size: 14px; }
+  .dvr-pager { gap: 4px; }
+  .dvr-hint { display: none; }
+}
