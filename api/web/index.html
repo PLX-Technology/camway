@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" href="/static/favicon-512.png">
-<link rel="stylesheet" href="/static/style.css?v=33">
+<link rel="stylesheet" href="/static/style.css?v=44">
 </head>
 <body>
 
@@ -19,18 +19,18 @@
     <span class="sitebadge" id="siteBadge" hidden title="Taladro / sitio de esta instancia de CamWay"></span>
     <span class="tag" id="tagDevices">—</span>
   </div>
-  <nav class="tabs">
-    <button class="tab" data-view="inventario" data-admin>Inventario</button>
-    <button class="tab active" data-view="mosaico">Mosaico</button>
-    <button class="tab" data-view="grabaciones">Grabaciones</button>
-    <button class="tab" data-view="ajustes" data-admin>Ajustes</button>
+  <nav class="tabs" role="tablist" aria-label="Secciones">
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-inventario" data-view="inventario" data-admin>Inventario</button>
+    <button class="tab active" role="tab" aria-selected="true" aria-controls="view-mosaico" data-view="mosaico">Mosaico</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-grabaciones" data-view="grabaciones">Grabaciones</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-ajustes" data-view="ajustes" data-admin>Ajustes</button>
   </nav>
   <div class="health">
-    <span class="dot" id="dotApi" title="API"></span> API
-    <span class="dot" id="dotMtx" title="MediaMTX"></span> MediaMTX
+    <span class="dot" id="dotApi" title="API" role="img" aria-label="Estado de la API"></span> API
+    <span class="dot" id="dotMtx" title="MediaMTX" role="img" aria-label="Estado de MediaMTX"></span> MediaMTX
     <span class="userbox" id="userBox" hidden>
-      <span class="usericon">◍</span><span id="userName"></span>
-      <button id="btnLogout" class="ghost small" title="Cerrar sesión">Salir</button>
+      <span class="usericon" aria-hidden="true">◍</span><span id="userName"></span>
+      <button id="btnLogout" class="ghost small" title="Cerrar sesión" aria-label="Cerrar sesión">Salir</button>
     </span>
   </div>
 </header>
@@ -69,10 +69,10 @@
     <details>
       <summary>Probar un equipo suelto</summary>
       <div class="singlerow">
-        <input id="oneHost" type="text" placeholder="172.16.0.139" spellcheck="false">
-        <input id="onePort" type="number" value="554" min="1" max="65535">
-        <input id="oneUser" type="text" placeholder="usuario (ej. admin)" spellcheck="false" autocomplete="off">
-        <input id="onePass" type="password" placeholder="clave" autocomplete="new-password">
+        <input id="oneHost" aria-label="Dirección del equipo" type="text" placeholder="172.16.0.139" spellcheck="false">
+        <input id="onePort" aria-label="Puerto RTSP" type="number" value="554" min="1" max="65535">
+        <input id="oneUser" aria-label="Usuario del equipo" type="text" placeholder="usuario (ej. admin)" spellcheck="false" autocomplete="off">
+        <input id="onePass" aria-label="Clave del equipo" type="password" placeholder="clave" autocomplete="new-password">
         <button id="btnProbe" class="ghost">Interrogar</button>
         <button id="btnOnvif" class="ghost">Descubrir por ONVIF</button>
       </div>
@@ -100,15 +100,15 @@
       </select>
     </div>
     <div class="field actions">
-      <button id="btnFit" class="ghost">⛶ Ajustar a pantalla</button>
-      <button id="btnNewZone" class="ghost">＋ Nueva zona</button>
+      <button id="btnFit" class="ghost"><span aria-hidden="true">⛶</span> Ajustar a pantalla</button>
+      <button id="btnNewZone" class="ghost"><span aria-hidden="true">＋</span> Nueva zona</button>
       <button id="btnWallReload" class="ghost">Recargar</button>
       <button id="btnWallStart" class="primary">Reanudar</button>
       <button id="btnWallStop" class="ghost">Pausar</button>
-      <button id="btnDvr" class="ghost" title="Vista en cuadrícula tipo DVR (2×2)">▦ DVR</button>
-      <button id="btnMosaicMode" class="ghost" title="Mosaico en fotogramas (ligero, muchas cámaras) o en vídeo en vivo (fluido, pocas cámaras)">🎞️ Mosaico</button>
-      <button id="btnLight" class="ghost" title="Para equipos lentos: menos fps y fotogramas más pequeños (solo este navegador)">🐢 Modo ligero</button>
-      <button id="btnAutoLive" class="ghost" title="Sube a vídeo en vivo las cámaras con detección reciente, solo si hay recursos (este navegador)">🎥 Auto-vivo</button>
+      <button id="btnDvr" class="ghost" title="Vista en cuadrícula tipo DVR (2×2)"><span aria-hidden="true">▦</span> DVR</button>
+      <button id="btnMosaicMode" class="ghost" title="Mosaico en fotogramas (ligero, muchas cámaras) o en vídeo en vivo (fluido, pocas cámaras)"><span aria-hidden="true">🎞️</span> Mosaico</button>
+      <button id="btnLight" class="ghost" title="Para equipos lentos: menos fps y fotogramas más pequeños (solo este navegador)"><span aria-hidden="true">🐢</span> Modo ligero</button>
+      <button id="btnAutoLive" class="ghost" title="Sube a vídeo en vivo las cámaras con detección reciente, solo si hay recursos (este navegador)"><span aria-hidden="true">🎥</span> Auto-vivo</button>
     </div>
     <p class="hint" id="wallHint">Arrastra las cámaras para reordenarlas o moverlas entre zonas.</p>
   </section>
@@ -123,12 +123,12 @@
 <main id="view-grabaciones" class="view">
   <section class="recbar">
     <div class="field">
-      <label>Cámara</label>
+      <label id="recCamLabel">Cámara</label>
       <div class="thumbselect" id="recCamSel">
-        <button type="button" class="ts-trigger" id="recCamTrigger">
+        <button type="button" class="ts-trigger" id="recCamTrigger" aria-haspopup="true" aria-labelledby="recCamLabel recCamName">
           <img class="ts-thumb" id="recCamThumb" alt="">
           <span class="ts-name" id="recCamName">—</span>
-          <span class="ts-caret">▾</span>
+          <span class="ts-caret" aria-hidden="true">▾</span>
         </button>
         <div class="ts-menu" id="recCamMenu" hidden></div>
       </div>
@@ -144,11 +144,11 @@
 </main>
 
 <!-- Reproductor de grabación -->
-<div id="recPlayer" class="modal" hidden>
+<div id="recPlayer" class="modal" role="dialog" aria-modal="true" aria-labelledby="recPlayTitle" hidden>
   <div class="modalcard recplayercard">
     <div class="modalhead">
       <h3 id="recPlayTitle">Grabación</h3>
-      <button class="ghost small" id="recPlayClose">Cerrar</button>
+      <button class="ghost small" id="recPlayClose" data-modal-close>Cerrar</button>
     </div>
     <video id="recVideo" controls autoplay playsinline></video>
     <div class="aifoot">
@@ -161,7 +161,7 @@
 <main id="view-ajustes" class="view">
   <!-- Resumen de salud del equipo (CPU, RAM, disco, temperaturas) leído de Netdata -->
   <section class="panel" id="panelSalud" data-admin>
-    <h2>🩺 Salud del equipo</h2>
+    <h2><span aria-hidden="true">🩺</span> Salud del equipo</h2>
     <p class="hint" id="hsSummary">Leyendo…</p>
     <div class="hsgrid" id="hsGrid"></div>
     <div class="hstemps" id="hsTemps"></div>
@@ -173,12 +173,12 @@
   </section>
 
   <section class="panel" id="panelSite">
-    <h2>🏷️ Identificación de esta instancia</h2>
+    <h2><span aria-hidden="true">🏷️</span> Identificación de esta instancia</h2>
     <p class="hint">Nombre del <strong>taladro o sitio</strong> donde corre este CamWay. Se muestra
       en el encabezado, el mosaico, la vista DVR, la pantalla de login y la pestaña
       del navegador, y sale en cada alerta de WhatsApp/correo para saber de dónde viene.</p>
     <div class="userform">
-      <input id="siteName" type="text" maxlength="60" placeholder="ej. Taladro PDV-108 · Pozo JA20-14" autocomplete="off">
+      <input id="siteName" aria-label="Nombre del taladro o sitio" type="text" maxlength="60" placeholder="ej. Taladro PDV-108 · Pozo JA20-14" autocomplete="off">
       <button id="btnSiteSave" class="primary">Guardar</button>
     </div>
   </section>
@@ -186,7 +186,7 @@
   <!-- Destinatarios de los avisos con foto por WhatsApp. Lo gestiona el admin o
        el jefe de seguridad (rol "seguridad"). -->
   <section class="panel" id="panelAlertas" hidden>
-    <h2>📲 Destinatarios de alertas (WhatsApp)</h2>
+    <h2><span aria-hidden="true">📲</span> Destinatarios de alertas (WhatsApp)</h2>
     <p class="hint">Cuando una cámara detecta una alarma (persona sin casco, fuego…)
       se envía una <strong>foto del momento</strong> a estos números. Usa el número
       con código de país. Cada cámara decide qué avisar en su botón <strong>IA</strong>
@@ -202,12 +202,12 @@
     </div>
     <p class="hint" id="alStatus"></p>
     <div class="userform">
-      <input id="alName" type="text" placeholder="nombre (ej. Jefe de seguridad)" maxlength="40" autocomplete="off">
-      <input id="alPhone" type="tel" placeholder="+58 414 1234567" autocomplete="off" inputmode="tel">
+      <input id="alName" aria-label="Nombre del destinatario" type="text" placeholder="nombre (ej. Jefe de seguridad)" maxlength="40" autocomplete="off">
+      <input id="alPhone" aria-label="Número de teléfono" type="tel" placeholder="+58 414 1234567" autocomplete="off" inputmode="tel">
       <button id="alAdd" class="primary">Agregar número</button>
     </div>
     <ul id="alList" class="userlist"></ul>
-    <h3 style="margin:16px 0 4px;font-size:13px">Últimos avisos</h3>
+    <h3 class="subhead">Últimos avisos</h3>
     <ul id="alLog" class="userlist"></ul>
   </section>
 
@@ -217,9 +217,9 @@
       <strong>viewer</strong> solo ve las cámaras que le asignes (y configura la
       IA de esas cámaras). Cada usuario tiene su propia configuración de IA.</p>
     <div class="userform">
-      <input id="uName" type="text" placeholder="usuario" spellcheck="false" autocomplete="off">
-      <input id="uPass" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
-      <select id="uRole">
+      <input id="uName" aria-label="Nombre de usuario" type="text" placeholder="usuario" spellcheck="false" autocomplete="off">
+      <input id="uPass" aria-label="Contraseña" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
+      <select id="uRole" aria-label="Rol">
         <option value="viewer">viewer</option>
         <option value="seguridad">seguridad (jefe de seguridad)</option>
         <option value="admin">admin</option>
@@ -259,7 +259,7 @@
     <div class="logorow">
       <img id="logoPreview" class="logoprev" alt="logo" hidden>
       <label class="filebtn">Elegir imagen
-        <input type="file" id="logoFile" accept="image/*" hidden>
+        <input type="file" id="logoFile" accept="image/*" class="sr-only">
       </label>
       <button id="btnLogoClear" class="ghost">Quitar</button>
       <span class="hint" id="logoHint"></span>
@@ -319,11 +319,11 @@
 </main>
 
 <!-- Vincular el WhatsApp que envía los avisos (QR o código) -->
-<div id="waModal" class="modal" hidden>
+<div id="waModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="waModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3>Vincular WhatsApp que enviará las alertas</h3>
-      <button class="ghost small" id="waClose">Cerrar</button>
+      <h3 id="waModalTitle">Vincular WhatsApp que enviará las alertas</h3>
+      <button class="ghost small" id="waClose" data-modal-close>Cerrar</button>
     </div>
     <p class="hint">En el celular del número que enviará las alertas abre
       <strong>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</strong>
@@ -332,9 +332,9 @@
       <img id="waQr" alt="Código QR de WhatsApp" hidden>
       <p class="hint" id="waQrMsg">Generando código…</p>
     </div>
-    <p class="hint" style="margin-top:12px">¿No puedes escanear? Vincula con el número de teléfono:</p>
+    <p class="hint mt-12">¿No puedes escanear? Vincula con el número de teléfono:</p>
     <div class="userform">
-      <input id="waPhone" type="tel" placeholder="número del celular, ej. +58 414 1234567" autocomplete="off">
+      <input id="waPhone" aria-label="Número del celular" type="tel" placeholder="número del celular, ej. +58 414 1234567" autocomplete="off">
       <button id="waPair" class="ghost" type="button">Obtener código</button>
     </div>
     <p id="waCode" class="wacode" hidden></p>
@@ -343,11 +343,11 @@
 </div>
 
 <!-- Configuración de IA por cámara -->
-<div id="aiModal" class="modal" hidden>
+<div id="aiModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3>Comportamiento IA — <span id="aiCamName"></span></h3>
-      <button class="ghost small" id="aiClose">Cerrar</button>
+      <h3 id="aiModalTitle">Comportamiento IA — <span id="aiCamName"></span></h3>
+      <button class="ghost small" id="aiClose" data-modal-close>Cerrar</button>
     </div>
     <p class="hint">La detección corre en el servidor (YOLO) cuando está disponible;
       si no, en el navegador como respaldo. El sonido suena en este navegador.</p>
@@ -378,7 +378,7 @@
       </label>
     </div>
 
-    <label class="aitoggle" style="margin-top:12px">
+    <label class="aitoggle mt-12">
       <input type="checkbox" id="aiSound"> Reproducir sonido de alarma al detectar
     </label>
 
@@ -391,13 +391,13 @@
       <label class="aitoggle"><input type="checkbox" id="aiSchedOn"> Solo en un horario</label>
       <div id="aiSchedBody">
         <div class="days" id="aiDays">
-          <button type="button" data-d="1">L</button>
-          <button type="button" data-d="2">M</button>
-          <button type="button" data-d="3">X</button>
-          <button type="button" data-d="4">J</button>
-          <button type="button" data-d="5">V</button>
-          <button type="button" data-d="6">S</button>
-          <button type="button" data-d="0">D</button>
+          <button type="button" data-d="1" aria-label="Lunes">L</button>
+          <button type="button" data-d="2" aria-label="Martes">M</button>
+          <button type="button" data-d="3" aria-label="Miércoles">X</button>
+          <button type="button" data-d="4" aria-label="Jueves">J</button>
+          <button type="button" data-d="5" aria-label="Viernes">V</button>
+          <button type="button" data-d="6" aria-label="Sábado">S</button>
+          <button type="button" data-d="0" aria-label="Domingo">D</button>
         </div>
         <div class="timerow">
           <label>Desde <input type="time" id="aiStart" value="21:00"></label>
@@ -411,7 +411,7 @@
          funciona aunque nadie tenga el DVR abierto). Solo admin. -->
     <div class="aisched" id="aiAlertBox" hidden>
       <label class="aitoggle"><input type="checkbox" id="alEnabled"> 📲 Avisar con foto por WhatsApp / correo</label>
-      <div id="alBody" style="margin-top:8px">
+      <div id="alBody" class="mt-8">
         <p class="hint" id="alChannels"></p>
         <div class="aigrid">
           <label class="aitoggle"><input type="checkbox" id="alHead"> ⛑️ Persona sin casco</label>
@@ -447,11 +447,11 @@
 </div>
 
 <!-- OSD: nombre y fecha/hora QUEMADOS en la cámara -->
-<div id="osdModal" class="modal" hidden>
+<div id="osdModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="osdModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3>OSD en la cámara — <span id="osdCamName"></span></h3>
-      <button class="ghost small" id="osdClose">Cerrar</button>
+      <h3 id="osdModalTitle">OSD en la cámara — <span id="osdCamName"></span></h3>
+      <button class="ghost small" id="osdClose" data-modal-close>Cerrar</button>
     </div>
     <p class="hint">Escribe el nombre y el sello de fecha/hora <strong>DENTRO de la cámara</strong>:
       queda grabado en el propio video y en las grabaciones (lo ve cualquier reproductor).
@@ -465,7 +465,7 @@
     <label class="aitoggle"><input type="checkbox" id="osdShowName" checked> Mostrar el nombre</label>
     <label class="aitoggle"><input type="checkbox" id="osdShowTime" checked> Mostrar fecha y hora</label>
     <label class="aitoggle"><input type="checkbox" id="osdSetTime"> Poner la cámara en hora</label>
-    <div class="aigrid" id="osdNtpRow" style="margin-top:6px">
+    <div class="aigrid mt-6" id="osdNtpRow">
       <label>Servidor NTP (sincronía permanente)
         <input type="text" id="osdNtp" placeholder="p.ej. 172.16.10.83 o pool.ntp.org">
       </label>
@@ -481,12 +481,12 @@
 </div>
 
 <!-- Editor de zona de detección (trazado libre) -->
-<div id="zoneEditor" class="modal" hidden>
+<div id="zoneEditor" class="modal" role="dialog" aria-modal="true" aria-labelledby="zoneModalTitle" hidden>
   <div class="modalcard zonecard">
     <div class="modalhead">
-      <h3>Zona de detección — <span id="zoneCamName"></span></h3>
+      <h3 id="zoneModalTitle">Zona de detección — <span id="zoneCamName"></span></h3>
       <button class="ghost small" id="zoneNewWin" title="Editar en una ventana aparte, más grande">⤢ Ventana nueva</button>
-      <button class="ghost small" id="zoneCancel">Cancelar</button>
+      <button class="ghost small" id="zoneCancel" data-modal-close>Cancelar</button>
     </div>
     <p class="hint">Mantén presionado y <strong>traza</strong> el área donde quieres detectar
       (por ejemplo, solo el parking). Fuera de la zona se ignora. Sin zona, se
@@ -505,7 +505,7 @@
 </div>
 
 <!-- ------------------------------------------------ LOGIN / SETUP -->
-<div id="authOverlay" class="authoverlay" hidden>
+<div id="authOverlay" class="authoverlay" role="dialog" aria-modal="true" aria-label="Acceso a CamWay" hidden>
   <div class="authcard">
     <div class="authbrand">
       <img id="authLogo" class="authlogo" alt="" hidden>
@@ -515,19 +515,19 @@
 
     <form id="loginForm" class="authform" hidden>
       <h3>Iniciar sesión</h3>
-      <input id="logUser" type="text" placeholder="usuario" autocomplete="username" spellcheck="false">
-      <input id="logPass" type="password" placeholder="contraseña" autocomplete="current-password">
+      <input id="logUser" aria-label="Usuario" type="text" placeholder="usuario" autocomplete="username" spellcheck="false">
+      <input id="logPass" aria-label="Contraseña" type="password" placeholder="contraseña" autocomplete="current-password">
       <button class="primary" type="submit">Entrar</button>
-      <p class="autherr" id="loginErr" hidden></p>
+      <p class="autherr" id="loginErr" role="alert" hidden></p>
     </form>
 
     <form id="setupForm" class="authform" hidden>
       <h3>Crear administrador</h3>
       <p class="hint">Primer arranque: define la cuenta de administrador.</p>
-      <input id="setUser" type="text" placeholder="usuario admin" autocomplete="username" spellcheck="false">
-      <input id="setPass" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
+      <input id="setUser" aria-label="Usuario administrador" type="text" placeholder="usuario admin" autocomplete="username" spellcheck="false">
+      <input id="setPass" aria-label="Contraseña" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
       <button class="primary" type="submit">Crear y entrar</button>
-      <p class="autherr" id="setupErr" hidden></p>
+      <p class="autherr" id="setupErr" role="alert" hidden></p>
     </form>
   </div>
 </div>
@@ -536,20 +536,20 @@
 <div id="dvrView" class="dvrview" hidden>
   <div class="dvr-bar">
     <span class="dvr-title" id="dvrTitle"></span>
-    <select id="dvrLayout" class="dvr-sel" title="Cámaras por pantalla">
+    <select id="dvrLayout" class="dvr-sel" title="Cámaras por pantalla" aria-label="Cámaras por pantalla">
       <option value="4" selected>2×2 (4)</option>
       <option value="9">3×3 (9)</option>
       <option value="16">4×4 (16)</option>
       <option value="1">1 cámara</option>
     </select>
     <span class="dvr-pager" id="dvrPager">
-      <button id="dvrPrev" class="dvr-btn" title="Página anterior (←)">◀</button>
-      <span id="dvrPageLbl">1/1</span>
-      <button id="dvrNext" class="dvr-btn" title="Página siguiente (→)">▶</button>
+      <button id="dvrPrev" class="dvr-btn" title="Página anterior (←)" aria-label="Página anterior">◀</button>
+      <span id="dvrPageLbl" aria-live="polite">1/1</span>
+      <button id="dvrNext" class="dvr-btn" title="Página siguiente (→)" aria-label="Página siguiente">▶</button>
     </span>
     <span class="dvr-sp"></span>
-    <button id="dvrFull" class="dvr-btn" title="Pantalla completa">⛶</button>
-    <button id="dvrClose" class="dvr-btn" title="Cerrar (Esc)">✕</button>
+    <button id="dvrFull" class="dvr-btn" title="Pantalla completa" aria-label="Pantalla completa">⛶</button>
+    <button id="dvrClose" class="dvr-btn" title="Cerrar vista DVR (Esc)" aria-label="Cerrar vista DVR">✕</button>
   </div>
   <div id="dvrGrid" class="dvr-grid"></div>
   <div id="dvrMax" class="dvr-max">
@@ -560,12 +560,11 @@
   </div>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-<!-- IA de respaldo del navegador, alojada local: CamWay funciona 100% offline -->
-<script src="/static/vendor/tf.min.js"></script>
-<script src="/static/vendor/coco-ssd.min.js"></script>
-<script src="/static/ui.js?v=1"></script>
+<!-- La IA de respaldo del navegador (tf.min.js + coco-ssd.min.js, locales y offline)
+     se carga bajo demanda desde app.js (loadTensorflow), no aquí. -->
+<script src="/static/ui.js?v=3"></script>
 <script src="/static/whep.js?v=1"></script>
 <script src="/static/dvr.js?v=8"></script>
 <script src="/static/app.js?v=96"></script>
