@@ -165,8 +165,8 @@ function showMenu() {
   if (maxed >= 0) restore();
   stopRec();
   openPanel("Menú", [
-    { label: "▶  En vivo", onSelect: closePanel },
-    { label: "⏺  Grabaciones", onSelect: showRecCameras },
+    { label: "En vivo", onSelect: closePanel },
+    { label: "Grabaciones", onSelect: showRecCameras },
   ], closePanel);
 }
 function showRecCameras() {
@@ -188,7 +188,7 @@ async function showRecClips(t) {
 function fmtRec(r) {
   const d = new Date((r.mtime || 0) * 1000), z = (n) => String(n).padStart(2, "0");
   const when = `${z(d.getDate())}/${z(d.getMonth() + 1)} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
-  const tag = r.kind === "event" ? "  🔔 evento" : "";
+  const tag = r.kind === "event" ? "  · evento" : "";
   return `${when}${tag}   ·  ${Math.round((r.size || 0) / 1048576)} MB`;
 }
 function playRecording(t, r) {
@@ -266,7 +266,7 @@ async function loadWall() {
   if (!list.length) { $("#empty").style.display = "flex"; return; }
   $("#empty").style.display = "none";
   buildGrid(list);
-  flashHint("◀ ▲ ▼ ▶ mover · OK maximizar · Atrás menú/grabaciones");
+  flashHint("Flechas: mover · OK: maximizar · Atrás: menú/grabaciones");
 }
 
 async function boot() {
