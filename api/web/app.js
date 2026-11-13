@@ -225,11 +225,50 @@ async function pollHealth() {
 
 // --------------------------------------------------------------- escaneo
 
+const LASTSCAN_KEY = "camway.lastscan";
+let scanMeta = null;            // {kind, cidr, t0} del escaneo en curso
+
 function setScanning(on) {
   $("#btnScan").disabled = on;
+  $("#btnOnvifScan").disabled = on;          // el servidor responde 409 si ya hay uno en curso
   $("#btnStop").disabled = !on;
   $("#progressBox").hidden = !on;
+  if (!on) scanMeta = null;
+  renderScanSummary();
 }
+
+function readLastScan() {
+  try { return JSON.parse(localStorage.getItem(LASTSCAN_KEY) || "null"); }
+  catch (_) { return null; }
+}
+
+function agoText(ts) {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return "hace unos segundos";
+  const m = Math.round(s / 60);
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `hace ${h} h` : `hace ${Math.round(h / 24)} d`;
+}
+
+// Resumen bajo el título. El servidor no guarda «el último escaneo»: se
+// recuerda aquí, en este navegador, solo lo que él mismo vio terminar.
+function renderScanSummary() {
+  const el = $("#scanSummary");
+  if (!el) return;
+  if (scanMeta) { el.textContent = `Escaneando ${scanMeta.cidr}…`; return; }
+  const n = state.devices.size;
+  const inv = n === 0 ? "Todavía no hay equipos. Lanza un escaneo del segmento."
+    : n === 1 ? "1 equipo en el inventario." : `${n} equipos en el inventario.`;
+  const last = readLastScan();
+  el.textContent = last
+    ? `Último escaneo ${agoText(last.ts)} (${last.kind === "onvif" ? "ONVIF" : "RTSP"}): ` +
+      `${last.cidr}, ${last.message}${last.secs != null ? ` en ${last.secs} s` : ""}. ${inv}`
+    : inv;
+}
+setInterval(() => { if (!document.hidden && !scanMeta) renderScanSummary(); }, 60000);
+
+$("#scanForm").addEventListener("submit", (e) => e.preventDefault());   // Enter = clic en Escanear
 
 $("#btnScan").addEventListener("click", async () => {
   const cidr = $("#cidr").value.trim();
@@ -240,8 +279,10 @@ $("#btnScan").addEventListener("click", async () => {
       method: "POST", timeout: 0,
       body: JSON.stringify({ cidr, channels: Number($("#channels").value) || 8 }),
     });
+    scanMeta = { kind: "scan", cidr, t0: Date.now() };
     setScanning(true);
     $("#progStage").textContent = "iniciando";
+    $("#progCount").textContent = "";
     $("#progFill").style.width = "0%";
     toast(`Escaneando ${r.hosts} direcciones en ${r.ports.length} puertos`);
     openEvents();
@@ -257,8 +298,10 @@ $("#btnOnvifScan").addEventListener("click", async () => {
     const r = await api("/api/onvif-scan", {
       method: "POST", timeout: 0, body: JSON.stringify({ cidr }),
     });
+    scanMeta = { kind: "onvif", cidr, t0: Date.now() };
     setScanning(true);
     $("#progStage").textContent = "ONVIF: buscando en :8080/:80";
+    $("#progCount").textContent = "";
     $("#progFill").style.width = "0%";
     toast(`Descubriendo por ONVIF en ${r.hosts} direcciones`);
     openEvents();
@@ -304,6 +347,15 @@ function openEvents() {
     if (e.stage === "fin" || e.stage === "cancelado") {
       $("#progStage").textContent = e.message || "terminado";
       $("#progFill").style.width = "100%";
+      if (e.stage === "fin" && scanMeta) {
+        try {
+          localStorage.setItem(LASTSCAN_KEY, JSON.stringify({
+            ts: Date.now(), kind: scanMeta.kind, cidr: scanMeta.cidr,
+            message: e.message || "terminado",
+            secs: Math.round((Date.now() - scanMeta.t0) / 1000),
+          }));
+        } catch (_) {}
+      }
       setScanning(false);
       sse.close();
       // Las tarjetas que llegaron por SSE no traen el id de cada stream, que
@@ -341,111 +393,267 @@ function openEvents() {
 }
 
 // --------------------------------------------------------------- equipos
+// Lista en filas. Cada equipo es un <div class="cm-row" id="dev-<id>">; filtrar
+// y buscar solo oculta filas (no se reconstruyen, así no se pierde lo que el
+// usuario está escribiendo en una fila).
+
+let invFilter = "all";
+let invQuery = "";
+const invSel = new Set();        // ids de equipos seleccionados (siempre visibles)
+const invAuthOpen = new Set();   // ids con el formulario de clave desplegado
 
 async function loadDevices() {
   const { devices } = await api("/api/devices");
   state.devices.clear();
-  $("#deviceList").innerHTML = "";
-  devices.forEach((d) => upsertDeviceCard(d, false));
-  updateEmpty();
+  invSel.clear();
+  invAuthOpen.clear();
+  $("#deviceList").replaceChildren();
+  devices.forEach((d) => upsertDeviceCard(d, false, true));
+  refreshInventory();
 }
 
-function updateEmpty() {
-  $("#emptyDevices").hidden = state.devices.size > 0;
+function updateEmpty() { scheduleInvRefresh(); }
+
+let invRefreshTimer = null;
+function scheduleInvRefresh() {
+  if (invRefreshTimer) return;
+  invRefreshTimer = setTimeout(() => { invRefreshTimer = null; refreshInventory(); }, 0);
 }
 
-function upsertDeviceCard(dev, isNew) {
+// Estado de un equipo para chips, contadores y filtros.
+function devInfo(dev) {
+  const streams = dev.streams || [];
+  const total = streams.length;
+  const pub = streams.filter((s) => s.published).length;
+  const saved = streams.every((s) => s.id);    // durante el escaneo aún no tienen id
+  let kind;
+  if (total === 0) kind = dev.needs_auth ? "auth" : "new";
+  else kind = pub > 0 ? "pub" : "new";
+  return { total, pub, saved, kind };
+}
+
+function devMatches(dev) {
+  if (invFilter !== "all" && devInfo(dev).kind !== invFilter) return false;
+  const q = invQuery.trim().toLowerCase();
+  if (!q) return true;
+  const hay = [dev.name, dev.host, `${dev.host}:${dev.port}`, dev.vendor, dev.server]
+    .join(" ").toLowerCase();
+  return hay.includes(q);
+}
+
+function refreshInventory() {
+  let all = 0, pub = 0, nw = 0, auth = 0, shown = 0;
+  state.devices.forEach((dev) => {
+    const kind = devInfo(dev).kind;
+    all++;
+    if (kind === "pub") pub++; else if (kind === "auth") auth++; else nw++;
+    const row = document.getElementById(`dev-${dev.id}`);
+    const ok = devMatches(dev);
+    if (row) row.hidden = !ok;
+    if (ok) shown++;
+    else if (invSel.delete(dev.id) && row) {   // lo oculto no queda seleccionado
+      const cb = row.querySelector("[data-sel]"); if (cb) cb.checked = false;
+    }
+  });
+  for (const id of [...invSel]) if (!state.devices.has(id)) invSel.delete(id);
+  $("#statAll").textContent = all;
+  $("#statPub").textContent = pub;
+  $("#statNew").textContent = nw;
+  $("#statAuth").textContent = auth;
+  $$(".cm-stat").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.filter === invFilter)));
+  $("#devShown").textContent = all === 0 ? "" :
+    shown === all ? `${all} en la lista` : `${shown} de ${all} en la lista`;
+  $("#emptyDevices").hidden = shown > 0;
+  $("#emptyDevices").textContent = all === 0
+    ? "Todavía no hay equipos. Lanza un escaneo del segmento."
+    : "Ningún equipo coincide con el filtro o la búsqueda.";
+  $("#selBar").hidden = invSel.size === 0;
+  $("#selLabel").textContent = invSel.size === 1 ? "1 seleccionada" : `${invSel.size} seleccionadas`;
+  const selectable = [...state.devices.values()].filter((d) => devMatches(d) && devInfo(d).saved && devInfo(d).total);
+  const selAll = $("#selAll");
+  selAll.checked = selectable.length > 0 && selectable.every((d) => invSel.has(d.id));
+  selAll.disabled = selectable.length === 0;
+  $("#btnClearAll").disabled = all === 0;
+  renderScanSummary();
+}
+
+$$(".cm-stat").forEach((b) => b.addEventListener("click", () => {
+  invFilter = b.dataset.filter;
+  refreshInventory();
+}));
+$("#devSearch").addEventListener("input", (e) => { invQuery = e.target.value; refreshInventory(); });
+$("#selAll").addEventListener("change", (e) => {
+  state.devices.forEach((dev) => {
+    const info = devInfo(dev);
+    if (!devMatches(dev) || !info.saved || !info.total) return;
+    if (e.target.checked) invSel.add(dev.id); else invSel.delete(dev.id);
+    const cb = document.querySelector(`#dev-${CSS.escape(dev.id)} [data-sel]`);
+    if (cb) cb.checked = e.target.checked;
+  });
+  refreshInventory();
+});
+$("#btnClearSel").addEventListener("click", () => {
+  invSel.clear();
+  $$("#deviceList [data-sel]").forEach((cb) => { cb.checked = false; });
+  refreshInventory();
+});
+$("#btnPubSel").addEventListener("click", () => {
+  const devs = [...invSel].map((id) => state.devices.get(id)).filter(Boolean);
+  publishMany(devs);
+});
+
+function upsertDeviceCard(dev, isNew, append = false) {
   state.devices.set(dev.id, dev);
   const existing = document.getElementById(`dev-${dev.id}`);
   const card = renderDevice(dev, isNew && !existing);
   if (existing) existing.replaceWith(card);
+  else if (append) $("#deviceList").append(card);
   else $("#deviceList").prepend(card);
-  updateEmpty();
+  card.hidden = !devMatches(dev);
+  scheduleInvRefresh();
+}
+
+function fmtRes(s) {
+  return s.width && s.height ? `${s.width}×${s.height}` : "resolución desconocida";
+}
+function fmtCodec(c) { return String(c || "?").replace(/^H(26[45])$/i, "H.$1"); }
+
+function renderStream(dev, s) {
+  // El id real solo existe cuando el equipo ya está guardado; durante el
+  // escaneo las tarjetas llegan sin él y no se puede publicar todavía.
+  const sid = s.id || "";
+  const pub = s.published;
+  return `
+    <li class="cm-stream">
+      <span class="cm-streaminfo" title="${esc(s.url)}">
+        <span class="cm-codec ${s.webrtc_ready ? "ok" : "warn"}">${esc(fmtCodec(s.codec))}</span>
+        ${s.audio_codec ? '<span class="cm-codec">audio</span>' : ""}
+        <span>${esc(fmtRes(s))}</span>
+        <span class="gx-muted">${esc(s.label)}${s.webrtc_ready ? "" : " · se transcodifica"}</span>
+      </span>
+      ${sid ? `<button type="button" class="cm-linkbtn" data-publish data-sid="${esc(sid)}"
+                 data-pub="${pub ? 1 : 0}" aria-label="${pub ? "Quitar del mosaico" : "Publicar"}: ${esc(s.label)}">${pub ? "Quitar" : "Publicar"}</button>` : ""}
+    </li>`;
 }
 
 function renderDevice(dev, animate) {
-  const card = document.createElement("article");
-  card.className = "card" + (animate ? " nuevo" : "");
-  card.id = `dev-${dev.id}`;
+  const info = devInfo(dev);
+  const label = dev.name || dev.host;
+  const first = (dev.streams || [])[0];
+  const pubStream = (dev.streams || []).find((s) => s.published && s.id);
+  const row = document.createElement("div");
+  row.className = "cm-row" + (animate ? " nuevo" : "");
+  row.id = `dev-${dev.id}`;
+  row.dataset.kind = info.kind;
 
-  const badges = [];
-  if (dev.vendor && dev.vendor !== "desconocido")
-    badges.push(`<span class="badge vendor">${esc(dev.vendor)}</span>`);
-  if (dev.kind === "nvr")
-    badges.push(`<span class="badge nvr">DVR/NVR · ${dev.streams.length} canales</span>`);
-  badges.push(dev.needs_auth
-    ? `<span class="badge auth">pide clave</span>`
-    : `<span class="badge libre">sin autenticación</span>`);
-  if (dev.permissive)
-    badges.push(`<span class="badge" title="Sirve el mismo video para cualquier ruta">rutas permisivas</span>`);
+  const vendor = dev.vendor && dev.vendor !== "desconocido" ? dev.vendor : "Sin identificar";
+  const tags = [];
+  if (dev.kind === "nvr") tags.push(`<span class="cm-tag">DVR/NVR · ${esc(info.total)} canales</span>`);
+  if (dev.permissive) tags.push(`<span class="cm-tag" title="Sirve el mismo video para cualquier ruta">rutas permisivas</span>`);
+  if (!dev.needs_auth) tags.push(`<span class="cm-tag" title="El equipo entrega video sin pedir clave">sin clave</span>`);
 
-  card.innerHTML = `
-    <div class="cardhead">
-      <div class="cardtitle">
-        <span class="host">${esc(dev.host)}:${esc(dev.port)}</span>
-        <span class="name" data-name>${esc(dev.name)}</span>
-        <button class="ghost small btnpush" data-act="rename">Nombrar</button>
-        <button class="ghost small" data-act="osd">OSD</button>
-        <button class="ghost small" data-act="forget">Olvidar</button>
-      </div>
-      <div class="cardsub">${dev.server ? esc(dev.server) : "sin banner"}</div>
-      <div class="badges">${badges.join("")}</div>
+  let chip;
+  if (info.kind === "auth") chip = `<span class="cw-chip cw-chip--auth">Pide clave</span>`;
+  else if (info.total === 0) chip = `<span class="cw-chip cw-chip--err">Sin vídeo</span>`;
+  else if (info.kind === "pub") chip = `<span class="cw-chip cw-chip--pub">Publicada${dev.kind === "nvr" && info.pub < info.total ? ` ${esc(info.pub)}/${esc(info.total)}` : ""}</span>`;
+  else chip = `<span class="cw-chip cw-chip--new">${info.saved ? "Sin publicar" : "Nuevo"}</span>`;
+
+  let main;      // acción principal de la fila
+  if (info.kind === "auth") main = `<button type="button" class="cw-btn cw-btn--sm" data-main="auth" aria-expanded="${invAuthOpen.has(dev.id)}">Ingresar clave</button>`;
+  else if (info.total === 0) main = `<button type="button" class="cw-btn cw-btn--sm" disabled>Sin streams</button>`;
+  else if (!info.saved) main = `<button type="button" class="cw-btn cw-btn--primary cw-btn--sm" disabled title="Disponible al terminar el escaneo">Publicar</button>`;
+  else if (info.kind === "pub" && info.pub === info.total) main = `<button type="button" class="cw-btn cw-btn--sm" data-main="view">Ver en mosaico</button>`;
+  else if (info.kind === "pub") main = `<button type="button" class="cw-btn cw-btn--sm" data-main="view">Ver en mosaico</button>`;
+  else main = `<button type="button" class="cw-btn cw-btn--primary cw-btn--sm" data-main="publish">Publicar</button>`;
+
+  const thumb = pubStream
+    ? `<img class="cm-thumbimg" loading="lazy" alt="Vista de ${esc(label)}" src="/api/wall/${encodeURIComponent(pubStream.id)}/frame?t=${Date.now()}">`
+    : (first && first.id
+      ? `<button type="button" class="cm-thumbbtn" data-snap data-sid="${esc(first.id)}" aria-label="Capturar una vista de ${esc(label)}" title="Pulsa para capturar un fotograma">${icon("camera", 18)}</button>`
+      : `<span class="cm-thumbph" aria-hidden="true">${icon(info.kind === "auth" ? "lock" : "noSignal", 18)}</span>`);
+
+  row.innerHTML = `
+    <label class="cm-c-check"><input type="checkbox" data-sel aria-label="Seleccionar ${esc(label)}"
+      ${invSel.has(dev.id) ? "checked" : ""} ${info.saved && info.total ? "" : "disabled"}></label>
+    <div class="cm-c-thumb"><div class="cm-thumb">${thumb}</div></div>
+    <div class="cm-c-name">
+      <div class="cm-name" data-name title="${esc(dev.server || "sin banner")}">${esc(label)}</div>
+      <div class="cm-addr gx-mono">${esc(dev.host)}:${esc(dev.port)}</div>
+      ${dev.error ? `<div class="cm-err">${esc(dev.error)}</div>` : ""}
     </div>
-    <ul class="streams">
-      ${dev.streams.map((s) => renderStream(dev, s)).join("")}
-    </ul>
-    ${dev.error ? `<div class="carderr">${esc(dev.error)}</div>` : ""}
-    ${(dev.needs_auth && dev.streams.length === 0) ? `
-      <div class="authform">
-        <div class="authrow">
-          <input type="text" data-auth-user placeholder="usuario" spellcheck="false" autocomplete="off" value="admin">
-          <input type="password" data-auth-pass placeholder="clave" autocomplete="new-password">
-          <button class="primary small" data-auth-probe>Probar</button>
-        </div>
-        <label class="authsave"><input type="checkbox" data-auth-save checked> recordar esta credencial</label>
-      </div>` : ""}
-  `;
+    <div class="cm-c-vendor"><span>${esc(vendor)}</span>${tags.length ? `<span class="cm-tags">${tags.join("")}</span>` : ""}</div>
+    <ul class="cm-c-streams cm-streams">${info.total
+      ? dev.streams.map((s) => renderStream(dev, s)).join("")
+      : `<li class="cm-stream gx-muted">${dev.needs_auth ? "Sin datos hasta ingresar la clave" : "No entrega ningún stream"}</li>`}</ul>
+    <div class="cm-c-state">${chip}</div>
+    <div class="cm-c-act">
+      ${main}
+      <button type="button" class="cw-ib cw-ib--sm" data-more aria-haspopup="menu" aria-expanded="false"
+        aria-label="Más acciones para ${esc(label)}: nombrar, OSD, olvidar">${icon("more", 16)}</button>
+    </div>
+    ${(info.kind === "auth" && invAuthOpen.has(dev.id)) ? `
+    <div class="cm-auth">
+      <label class="gx-field">Usuario
+        <input type="text" class="gx-in" data-auth-user spellcheck="false" autocomplete="off" value="admin"></label>
+      <label class="gx-field">Clave
+        <input type="password" class="gx-in" data-auth-pass autocomplete="new-password"></label>
+      <button type="button" class="cw-btn cw-btn--primary cw-btn--sm" data-auth-probe>Probar</button>
+      <label class="cm-authsave"><input type="checkbox" data-auth-save checked> recordar esta credencial</label>
+    </div>` : ""}`;
 
-  card.querySelector('[data-act="rename"]').addEventListener("click", async () => {
-    const name = await uiPrompt("Nombre para este equipo", { value: dev.name || "", okLabel: "Guardar" });
-    if (name === null) return;
-    try {
-      await api(`/api/devices/${dev.id}`, {
-        method: "PATCH", body: JSON.stringify({ name }),
-      });
-      dev.name = name;
-      card.querySelector("[data-name]").textContent = name;
-    } catch (err) { toast("No se pudo renombrar: " + err.message, true); }
+  // Selección
+  row.querySelector("[data-sel]").addEventListener("change", (e) => {
+    if (e.target.checked) invSel.add(dev.id); else invSel.delete(dev.id);
+    scheduleInvRefresh();
   });
 
-  card.querySelector('[data-act="osd"]').addEventListener("click", () => openOsdModal(dev));
+  // Vista previa: capturar un fotograma bajo demanda (no martillea la cámara)
+  const snapBtn = row.querySelector("[data-snap]");
+  if (snapBtn) snapBtn.addEventListener("click", () => loadSnapshot(snapBtn));
+  const timg = row.querySelector(".cm-thumbimg");
+  if (timg) timg.addEventListener("error", () => {
+    timg.replaceWith(Object.assign(document.createElement("span"), {
+      className: "cm-thumbph", textContent: "sin imagen",
+    }));
+  }, { once: true });
 
-  card.querySelector('[data-act="forget"]').addEventListener("click", async () => {
-    if (!(await uiConfirm(`¿Quitar ${dev.host} del inventario?`, { okLabel: "Quitar", danger: true }))) return;
-    try {
-      await api(`/api/devices/${dev.id}`, { method: "DELETE" });
-      state.devices.delete(dev.id);
-      card.remove();
-      updateEmpty();
-      pollHealth();
-    } catch (err) { toast("No se pudo quitar el equipo: " + err.message, true); }
+  // Acción principal
+  const mainBtn = row.querySelector("[data-main]");
+  if (mainBtn) mainBtn.addEventListener("click", async () => {
+    const act = mainBtn.dataset.main;
+    if (act === "view") { document.querySelector('.tab[data-view="mosaico"]').click(); return; }
+    if (act === "auth") {
+      if (invAuthOpen.has(dev.id)) invAuthOpen.delete(dev.id); else invAuthOpen.add(dev.id);
+      upsertDeviceCard(dev, false);
+      const again = document.getElementById(`dev-${dev.id}`);
+      const u = again && again.querySelector("[data-auth-pass]");
+      if (u) u.focus();
+      return;
+    }
+    if (act === "publish") publishMany([dev]);
   });
 
-  card.querySelectorAll("[data-publish]").forEach((btn) => {
+  // Más acciones
+  row.querySelector("[data-more]").addEventListener("click", (e) => {
+    openRowMenu(e.currentTarget, [
+      { icon: "edit", label: "Nombrar", run: () => renameDevice(dev) },
+      { icon: "layers", label: "OSD en la cámara", run: () => openOsdModal(dev) },
+      { icon: "trash", label: "Olvidar", danger: true, run: () => forgetDevice(dev) },
+    ]);
+  });
+
+  // Publicar / quitar por stream
+  row.querySelectorAll("[data-publish]").forEach((btn) => {
     btn.addEventListener("click", () => togglePublish(btn, dev));
   });
 
-  card.querySelectorAll("[data-snap]").forEach((img) => {
-    img.addEventListener("click", () => loadSnapshot(img));
-    if (img.dataset.auto === "1") loadSnapshot(img);
-  });
-
-  const probeBtn = card.querySelector("[data-auth-probe]");
+  // Ingreso de clave en la fila
+  const probeBtn = row.querySelector("[data-auth-probe]");
   if (probeBtn) {
     const submit = async () => {
-      const username = card.querySelector("[data-auth-user]").value.trim();
-      const password = card.querySelector("[data-auth-pass]").value;
-      const save = card.querySelector("[data-auth-save]").checked;
+      const username = row.querySelector("[data-auth-user]").value.trim();
+      const password = row.querySelector("[data-auth-pass]").value;
+      const save = row.querySelector("[data-auth-save]").checked;
       if (!username) return toast("Escribe el usuario de la cámara", true);
       probeBtn.disabled = true;
       probeBtn.textContent = "Probando…";
@@ -456,6 +664,7 @@ function renderDevice(dev, animate) {
         });
         if (updated.recovered) {
           toast(`${dev.host}: ${updated.streams.length} stream(s) — credencial correcta`);
+          invAuthOpen.delete(dev.id);
           upsertDeviceCard(updated, false);
           pollHealth();
         } else {
@@ -470,88 +679,185 @@ function renderDevice(dev, animate) {
       }
     };
     probeBtn.addEventListener("click", submit);
-    card.querySelector("[data-auth-pass]").addEventListener("keydown", (e) => {
+    row.querySelector("[data-auth-pass]").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submit();
     });
   }
 
-  return card;
+  return row;
 }
 
-function renderStream(dev, s) {
-  // El id real solo existe cuando el equipo ya está guardado; durante el
-  // escaneo las tarjetas llegan sin él y no se puede publicar todavía.
-  const sid = s.id || "";
-  const codecClass = s.webrtc_ready ? "h264" : "otro";
-  const publishable = Boolean(sid);
-  const pub = s.published;
-
-  return `
-    <li class="streamrow">
-      ${sid
-        ? `<img class="thumb" data-snap data-sid="${esc(sid)}" data-auto="0"
-                alt="miniatura" title="Pulsa para capturar un fotograma"
-                src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">`
-        : `<div class="thumb vacia">sin guardar</div>`}
-      <div class="streaminfo">
-        <div class="top">
-          <span class="path" title="${esc(s.url)}">${esc(s.path)}</span>
-          <span class="chip ${codecClass}">${esc(s.codec)}</span>
-          ${s.audio_codec ? `<span class="chip">audio</span>` : ""}
-        </div>
-        <div class="meta">
-          ${esc(dims(s))}${s.profile ? " · " + esc(s.profile) : ""} · ${esc(s.label)}
-          ${s.webrtc_ready ? "" : " · necesita transcodificar para WebRTC"}
-        </div>
-      </div>
-      ${publishable
-        ? `<button class="${pub ? "ghost" : "primary"} small"
-                   data-publish data-sid="${esc(sid)}" data-pub="${pub ? 1 : 0}">
-             ${pub ? "Quitar" : "Publicar"}
-           </button>`
-        : ""}
-    </li>`;
+async function renameDevice(dev) {
+  const name = await uiPrompt("Nombre para este equipo", { value: dev.name || "", okLabel: "Guardar" });
+  if (name === null) return;
+  try {
+    await api(`/api/devices/${dev.id}`, {
+      method: "PATCH", body: JSON.stringify({ name }),
+    });
+    dev.name = name;
+    upsertDeviceCard(dev, false);
+  } catch (err) { toast("No se pudo renombrar: " + err.message, true); }
 }
 
+async function forgetDevice(dev) {
+  if (!(await uiConfirm(`¿Quitar ${dev.host} del inventario?`, { okLabel: "Quitar", danger: true }))) return;
+  try {
+    await api(`/api/devices/${dev.id}`, { method: "DELETE" });
+    state.devices.delete(dev.id);
+    invSel.delete(dev.id);
+    invAuthOpen.delete(dev.id);
+    const row = document.getElementById(`dev-${dev.id}`);
+    if (row) row.remove();
+    scheduleInvRefresh();
+    pollHealth();
+  } catch (err) { toast("No se pudo quitar el equipo: " + err.message, true); }
+}
+
+// Menú «más acciones» de una fila: un solo menú a la vez, con teclado
+// (flechas, Escape) y foco devuelto al botón.
+let rowMenu = null;
+function closeRowMenu(refocus = false) {
+  if (!rowMenu) return;
+  const { el, btn } = rowMenu;
+  rowMenu = null;
+  el.remove();
+  btn.setAttribute("aria-expanded", "false");
+  if (refocus) btn.focus();
+}
+function openRowMenu(btn, items) {
+  const wasOpen = rowMenu && rowMenu.btn === btn;
+  closeRowMenu();
+  if (wasOpen) return;
+  const el = document.createElement("div");
+  el.className = "cm-menu";
+  el.setAttribute("role", "menu");
+  items.forEach((it) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cm-menuitem" + (it.danger ? " danger" : "");
+    b.setAttribute("role", "menuitem");
+    b.innerHTML = `${icon(it.icon, 16)}<span>${esc(it.label)}</span>`;
+    b.addEventListener("click", () => { closeRowMenu(); it.run(); });
+    el.appendChild(b);
+  });
+  el.addEventListener("keydown", (e) => {
+    const bs = [...el.querySelectorAll("button")];
+    const i = bs.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); bs[(i - 1 + bs.length) % bs.length].focus(); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeRowMenu(true); }
+    else if (e.key === "Tab") closeRowMenu();
+  });
+  document.body.appendChild(el);
+  const r = btn.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + "px";
+  el.style.top = (r.bottom + h + 8 > window.innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  btn.setAttribute("aria-expanded", "true");
+  rowMenu = { el, btn };
+  el.querySelector("button").focus();
+}
+document.addEventListener("click", (e) => {
+  if (rowMenu && !rowMenu.el.contains(e.target) && !rowMenu.btn.contains(e.target)) closeRowMenu();
+}, true);
+window.addEventListener("resize", () => closeRowMenu());
+window.addEventListener("scroll", () => closeRowMenu(), true);
+
+// ¿Qué streams publica la acción «Publicar» de un equipo? Un NVR publica todos
+// sus canales; una cámara, su stream principal (el primero que WebRTC sabe
+// llevar; si ninguno, el primero). El resto se publica desde su fila.
+function streamsToPublish(dev) {
+  const todo = (dev.streams || []).filter((s) => s.id && !s.published);
+  if (!todo.length) return [];
+  if (dev.kind === "nvr") return todo;
+  return [todo.find((s) => s.webrtc_ready) || todo[0]];
+}
+
+async function publishStream(s, on) {
+  if (on) {
+    const r = await api(`/api/streams/${encodeURIComponent(s.id)}/publish`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+    s.published = true;
+    return r;
+  }
+  await api(`/api/streams/${encodeURIComponent(s.id)}/publish`, { method: "DELETE" });
+  s.published = false;
+  return null;
+}
+
+// Publica los equipos indicados, de a 3 a la vez, y avisa al final.
+async function publishMany(devs) {
+  const jobs = [];
+  devs.forEach((dev) => streamsToPublish(dev).forEach((s) => jobs.push({ dev, s })));
+  if (!jobs.length) return toast("No hay nada que publicar en lo seleccionado", true);
+  const btns = [$("#btnPubSel"), ...devs.map((d) => document.querySelector(`#dev-${CSS.escape(d.id)} [data-main="publish"]`))].filter(Boolean);
+  btns.forEach((b) => { b.disabled = true; });
+  let done = 0, failed = 0, transcode = 0, lastErr = "";
+  const touched = new Set();
+  const next = async () => {
+    while (jobs.length) {
+      const { dev, s } = jobs.shift();
+      try {
+        const r = await publishStream(s, true);
+        if (r && r.transcode) transcode++;
+      } catch (err) { failed++; lastErr = err.message; }
+      touched.add(dev);
+      done++;
+      if (devs.length > 1) $("#devShown").textContent = `Publicando… ${done}`;
+    }
+  };
+  await Promise.all([next(), next(), next()]);
+  touched.forEach((dev) => upsertDeviceCard(dev, false));
+  btns.forEach((b) => { b.disabled = false; });
+  const ok = done - failed;
+  if (failed) toast(`${ok} publicada(s), ${failed} con error: ${lastErr}`, true);
+  else toast(ok === 1 && !transcode ? "Publicado; H.264 pasa tal cual"
+    : `${ok} publicada(s)${transcode ? `, ${transcode} con transcodificación (consume CPU)` : ""}`);
+  refreshInventory();
+}
+
+// Publicar o quitar un stream concreto desde su fila.
 async function togglePublish(btn, dev) {
   const sid = btn.dataset.sid;
+  const s = dev.streams.find((x) => x.id === sid);
+  if (!s) return;
   const isPub = btn.dataset.pub === "1";
   btn.disabled = true;
   try {
-    if (isPub) {
-      await api(`/api/streams/${sid}/publish`, { method: "DELETE" });
-      btn.textContent = "Publicar";
-      btn.className = "primary small";
-      btn.dataset.pub = "0";
-      toast("Stream retirado del mosaico");
-    } else {
-      const r = await api(`/api/streams/${sid}/publish`, {
-        method: "POST", body: JSON.stringify({}),
-      });
-      btn.textContent = "Quitar";
-      btn.className = "ghost small";
-      btn.dataset.pub = "1";
-      toast(r.transcode
-        ? "Publicado con transcodificación (consume CPU)"
+    const r = await publishStream(s, !isPub);
+    upsertDeviceCard(dev, false);
+    toast(isPub ? "Stream retirado del mosaico"
+      : r && r.transcode ? "Publicado con transcodificación (consume CPU)"
         : "Publicado; H.264 pasa tal cual");
-    }
   } catch (err) {
     toast(err.message, true);
-  } finally {
     btn.disabled = false;
   }
 }
 
-function loadSnapshot(img) {
-  img.src = `/api/streams/${img.dataset.sid}/snapshot?width=240&t=${Date.now()}`;
-  img.onerror = () => {
-    img.replaceWith(Object.assign(document.createElement("div"), {
-      className: "thumb vacia", textContent: "sin imagen",
+function loadSnapshot(btn) {
+  const img = document.createElement("img");
+  img.className = "cm-thumbimg";
+  img.alt = "Vista previa";
+  img.addEventListener("error", () => {
+    img.replaceWith(Object.assign(document.createElement("span"), {
+      className: "cm-thumbph", textContent: "sin imagen",
     }));
-  };
+  }, { once: true });
+  img.src = `/api/streams/${encodeURIComponent(btn.dataset.sid)}/snapshot?width=240&t=${Date.now()}`;
+  btn.replaceWith(img);
 }
 
 // --------------------------------------------------------------- equipo suelto
+
+$("#btnManual").addEventListener("click", () => {
+  const box = $("#manualBox");
+  const open = box.hidden;
+  box.hidden = !open;
+  $("#btnManual").setAttribute("aria-expanded", String(open));
+  if (open) $("#oneHost").focus();
+});
 
 $("#btnProbe").addEventListener("click", async () => {
   const host = $("#oneHost").value.trim();
@@ -597,7 +903,7 @@ $("#btnOnvif").addEventListener("click", async () => {
     toast(err.message, true);
   } finally {
     btn.disabled = false;
-    btn.textContent = "Descubrir por ONVIF";
+    btn.textContent = "Buscar por multicast";
   }
 });
 

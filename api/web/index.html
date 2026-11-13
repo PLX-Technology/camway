@@ -37,53 +37,99 @@
   </div>
 </header>
 
-<!-- ------------------------------------------------ INVENTARIO -->
+<!-- ------------------------------------------------ CÁMARAS (inventario) -->
 <main id="view-inventario" class="view">
+  <div class="gx-page">
 
-  <section class="scanbar">
-    <div class="field grow">
-      <label for="cidr">Segmento a escanear</label>
-      <input id="cidr" type="text" placeholder="172.16.0.0/24" spellcheck="false">
-      <small>CIDR (<code>172.16.0.0/24</code>) o rango (<code>172.16.0.1-254</code>). Tope 8192 direcciones.</small>
-    </div>
-    <div class="field narrow">
-      <label for="channels">Canales DVR</label>
-      <input id="channels" type="number" min="1" max="64" value="8">
-      <small>Cuántos canales tantear</small>
-    </div>
-    <div class="field actions">
-      <button id="btnScan" class="primary">Escanear</button>
-      <button id="btnOnvifScan" class="ghost" title="Descubre cámaras por ONVIF en :8080/:80 y obtiene su ruta RTSP exacta">Descubrir ONVIF</button>
-      <button id="btnStop" class="ghost" disabled>Detener</button>
-      <button id="btnClearAll" class="ghost danger" title="Borra TODO el inventario para escanear limpio (no toca grabaciones)">Borrar todos</button>
-    </div>
-  </section>
-
-  <section class="progress" id="progressBox" hidden>
-    <div class="bar"><div class="fill" id="progFill"></div></div>
-    <div class="progmeta">
-      <span id="progStage">—</span>
-      <span id="progCount"></span>
-    </div>
-  </section>
-
-  <section class="single">
-    <details>
-      <summary>Probar un equipo suelto</summary>
-      <div class="singlerow">
-        <input id="oneHost" aria-label="Dirección del equipo" type="text" placeholder="172.16.0.139" spellcheck="false">
-        <input id="onePort" aria-label="Puerto RTSP" type="number" value="554" min="1" max="65535">
-        <input id="oneUser" aria-label="Usuario del equipo" type="text" placeholder="usuario (ej. admin)" spellcheck="false" autocomplete="off">
-        <input id="onePass" aria-label="Clave del equipo" type="password" placeholder="clave" autocomplete="new-password">
-        <button id="btnProbe" class="ghost">Interrogar</button>
-        <button id="btnOnvif" class="ghost">Descubrir por ONVIF</button>
+    <div class="gx-head">
+      <div class="gx-titlebox">
+        <h1 class="gx-h1">Cámaras</h1>
+        <p class="gx-sub" id="scanSummary">Todavía no hay equipos. Lanza un escaneo del segmento.</p>
       </div>
-      <p class="hint" id="onvifHint"></p>
-    </details>
-  </section>
+      <form class="cm-scanform" id="scanForm" aria-label="Buscar cámaras en la red">
+        <label class="gx-field">Segmento
+          <input id="cidr" class="gx-in gx-mono cm-cidr" type="text" placeholder="172.16.0.0/24" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="gx-field">Canales DVR
+          <input id="channels" class="gx-in cm-channels" type="number" min="1" max="64" value="8">
+        </label>
+        <button id="btnScan" class="cw-btn cw-btn--primary" type="submit"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>Escanear</button>
+        <button id="btnOnvifScan" class="cw-btn" type="button" title="Descubre cámaras por ONVIF en :8080/:80 y obtiene su ruta RTSP exacta">Descubrir ONVIF</button>
+        <button id="btnManual" class="cw-btn" type="button" aria-expanded="false" aria-controls="manualBox">Agregar a mano</button>
+        <button id="btnStop" class="cw-btn" type="button" disabled>Detener</button>
+      </form>
+    </div>
 
-  <section id="deviceList" class="devices"></section>
-  <p class="empty" id="emptyDevices">Todavía no hay equipos. Lanza un escaneo del segmento.</p>
+    <section class="cm-progress" id="progressBox" aria-label="Progreso del escaneo" hidden>
+      <div class="cm-bar"><div class="cm-fill" id="progFill"></div></div>
+      <div class="cm-progmeta" role="status">
+        <span id="progStage">—</span>
+        <span id="progCount"></span>
+      </div>
+    </section>
+
+    <section class="cw-card cm-manual" id="manualBox" aria-label="Agregar un equipo a mano" hidden>
+      <div class="cm-manualrow">
+        <label class="gx-field cm-f-host">Dirección
+          <input id="oneHost" class="gx-in gx-mono" type="text" placeholder="172.16.0.139" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="gx-field cm-f-port">Puerto RTSP
+          <input id="onePort" class="gx-in" type="number" value="554" min="1" max="65535">
+        </label>
+        <label class="gx-field cm-f-user">Usuario
+          <input id="oneUser" class="gx-in" type="text" placeholder="ej. admin" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="gx-field cm-f-pass">Clave
+          <input id="onePass" class="gx-in" type="password" placeholder="clave" autocomplete="new-password">
+        </label>
+        <button id="btnProbe" class="cw-btn cw-btn--primary" type="button">Interrogar</button>
+        <button id="btnOnvif" class="cw-btn" type="button" title="Busca equipos ONVIF que respondan al multicast de esta red">Buscar por multicast</button>
+      </div>
+      <p class="gx-hint" id="onvifHint"></p>
+    </section>
+
+    <div class="cm-stats" role="group" aria-label="Filtrar por estado">
+      <button type="button" class="cm-stat" data-filter="all" aria-pressed="true"><span class="cm-statlabel"><span class="cw-dot cm-dot-all"></span>Equipos</span><span class="cm-statn" id="statAll">0</span></button>
+      <button type="button" class="cm-stat" data-filter="pub" aria-pressed="false"><span class="cm-statlabel"><span class="cw-dot cm-dot-pub"></span>Publicadas</span><span class="cm-statn" id="statPub">0</span></button>
+      <button type="button" class="cm-stat" data-filter="new" aria-pressed="false"><span class="cm-statlabel"><span class="cw-dot cm-dot-new"></span>Sin publicar</span><span class="cm-statn" id="statNew">0</span></button>
+      <button type="button" class="cm-stat" data-filter="auth" aria-pressed="false"><span class="cm-statlabel"><span class="cw-dot cm-dot-auth"></span>Piden clave</span><span class="cm-statn" id="statAuth">0</span></button>
+    </div>
+
+    <div class="cm-toolbar">
+      <div class="cm-search">
+        <svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="devSearch" class="gx-in" type="search" aria-label="Buscar por nombre, IP o marca" placeholder="Buscar por nombre, IP o marca" autocomplete="off">
+      </div>
+      <span class="gx-muted" id="devShown" role="status"></span>
+      <div class="cm-toolbar-r">
+        <div class="cm-selbar" id="selBar" hidden>
+          <span id="selLabel">0 seleccionadas</span>
+          <button id="btnPubSel" class="cw-btn cw-btn--primary cw-btn--sm" type="button">Publicar seleccionadas</button>
+          <button id="btnClearSel" class="cw-btn cw-btn--sm" type="button">Quitar selección</button>
+        </div>
+        <button id="btnClearAll" class="cw-btn cw-btn--danger cw-btn--sm" type="button" title="Borra TODO el inventario para escanear limpio (no toca grabaciones)">Borrar todos</button>
+      </div>
+    </div>
+
+    <div class="cw-card cm-tablecard">
+      <div class="cm-scroll">
+        <div class="cm-table">
+          <div class="cm-head">
+            <label class="cm-c-check"><input type="checkbox" id="selAll" aria-label="Seleccionar todas las visibles"></label>
+            <span class="cm-c-thumb">Vista</span>
+            <span class="cm-c-name">Equipo</span>
+            <span class="cm-c-vendor">Marca</span>
+            <span class="cm-c-streams">Streams</span>
+            <span class="cm-c-state">Estado</span>
+            <span class="cm-c-act">Acciones</span>
+          </div>
+          <div id="deviceList" class="cm-list"></div>
+          <p class="gx-empty" id="emptyDevices">Todavía no hay equipos. Lanza un escaneo del segmento.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
 </main>
 
 <!-- ------------------------------------------------ MOSAICO -->
