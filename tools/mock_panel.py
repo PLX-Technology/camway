@@ -31,6 +31,9 @@ y "><svg onload=alert(2)>) en nombre de equipo, banner, vendor, error, título
 de cámara, nombre de grabación, usuario y destinatario: si el panel los
 interpreta como HTML, saltará alert(). Deben verse como texto.
 
+Ruta solo del mock: POST/GET /__mock/mosaic-foreign simula que otro usuario armó el
+mosaico con todas las cámaras (para ver el 403 de /whep/mosaico en un viewer).
+
 WHEP/HLS responden 404 (no hay vídeo): el mosaico por defecto usa fotogramas
 (--mosaic-mode frames); un favicon-512.png fijo hace de fotograma.
 """
@@ -309,6 +312,8 @@ def is_admin_path(path: str, method: str) -> bool:
         return True
     if path.startswith("/api/recordings") and method in ("POST", "PUT", "DELETE"):
         return True
+    if path == "/api/mosaic" and method == "DELETE":          # A2: apaga el mosaico de todos
+        return True
     return False
 
 
@@ -469,6 +474,15 @@ class Handler(BaseHTTPRequestHandler):
                 page = {"/": "index.html", "/tv": "tv.html", "/live": "live.html",
                         "/nvr": "nvr.html"}[path]
                 return self.serve_file(os.path.join(ARGS.web, page), nocache=True)
+
+            if path == "/__mock/mosaic-foreign" and method in ("GET", "POST"):
+                # Solo del mock: simula que OTRO usuario (admin) armó el mosaico con
+                # TODAS las cámaras, para probar cómo reacciona el panel al 403 de
+                # /whep/mosaico (A2) sin necesitar dos sesiones.
+                names = [safe_name(x["mtx_name"]) for dv in DATA["devices"]
+                         for x in dv["streams"] if x["published"]]
+                DATA["mosaic"] = {"layout": 16, "page": 0, "names": names[:16]}
+                return self.json({"ok": True, "names": DATA["mosaic"]["names"]})
 
             user = self.gate(path, method)
             self.user = user
@@ -796,6 +810,7 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST":
                 return self._mosaic_set()
             if method == "DELETE":
+                self._require_admin()
                 d["mosaic"] = None
                 return self.json({"ok": True})
         if path.startswith("/whep/"):
@@ -996,6 +1011,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.user["role"] != "admin":
             raise ApiError(403, "requiere administrador")
 
+    def _sees_all(self) -> bool:
+        return self.user["role"] == "admin" or bool(self.user.get("_kiosk"))
+
     def _require_alert_manager(self):
         if self.user["role"] not in ("admin", "seguridad"):
             raise ApiError(403, "requiere administrador o jefe de seguridad")
@@ -1084,6 +1102,8 @@ class Handler(BaseHTTPRequestHandler):
     def _mosaic_set(self):
         b = self.body_json()
         cams = self._published_cams()
+        if not cams and not self._sees_all():
+            raise ApiError(403, "no tienes cámaras asignadas")
         try:
             layout = int(b.get("layout") or 4)
             page = int(b.get("page") or 0)
@@ -1096,7 +1116,10 @@ class Handler(BaseHTTPRequestHandler):
         rows = math.ceil(layout / cols)
         pages = max(1, math.ceil(len(cams) / layout)) if cams else 1
         page = max(0, min(page, pages - 1))
-        DATA["mosaic"] = {"layout": layout, "page": page, "names": [c["name"] for c in cams]}
+        # El mosaico es UNO para todos (un ffmpeg): lo que arma este usuario es lo
+        # que verá cualquiera que lo lea; /whep/mosaico decide quién puede (A2).
+        DATA["mosaic"] = {"layout": layout, "page": page,
+                          "names": [c["name"] for c in cams[page * layout: page * layout + layout]]}
         info = {"whep": "/whep/mosaico", "layout": layout, "page": page, "pages": pages,
                 "cols": cols, "rows": rows, "per_page": layout,
                 "cells": cams[page * layout: page * layout + layout], "total": len(cams)}
@@ -1107,6 +1130,14 @@ class Handler(BaseHTTPRequestHandler):
             self.body_raw()
             return self._send(204, b"", "text/plain")
         self.body_raw()
+        if path == "/whep/mosaico" and not self._sees_all():
+            m = DATA["mosaic"]
+            if not m or not m["names"]:
+                return self.error(404, "mosaico no armado")
+            for n in m["names"]:
+                _dev, s = find_stream(n)
+                if s and not user_allows(self.user, _dev["id"]):
+                    return self.error(403, "el mosaico actual incluye cámaras que no tienes asignadas")
         return self.error(404, "sin vídeo en el servidor de prueba (WHEP no disponible)")
 
     def _rec_devices(self) -> dict:

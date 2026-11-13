@@ -141,6 +141,12 @@ class MosaicManager:
         return {"whep": f"/whep/{MOSAIC_NAME}", "layout": layout, "page": page,
                 "pages": pages, "cols": cols, "rows": rows, "per_page": per}
 
+    def current_names(self) -> list:
+        """Rutas (mtx_name) de las cámaras que componen el mosaico ahora mismo, o
+        [] si no hay mosaico armado. Sirve para decidir quién puede verlo: el
+        ffmpeg es UNO para todos, así que quien lo lea ve TODAS estas cámaras."""
+        return list(self._cfg[2]) if self._cfg else []
+
     async def _restart(self) -> None:
         await self._kill()
         try:
@@ -180,6 +186,7 @@ class MosaicManager:
     async def stop(self, mtx) -> None:
         async with self._lock:
             self._want = False
+            self._cfg = None             # ya no hay mosaico: nadie debe poder leerlo
             await self._kill()
         try:
             await mtx.unpublish(MOSAIC_NAME)

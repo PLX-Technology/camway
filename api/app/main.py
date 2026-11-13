@@ -623,6 +623,10 @@ def _is_admin_path(path: str, method: str) -> bool:
     # grabado es GET y queda sujeto al permiso por cámara, no a admin.)
     if path.startswith("/api/recordings") and method in ("POST", "PUT", "DELETE"):
         return True
+    # Detener el mosaico del servidor lo apaga para todos: solo admin. (Armarlo,
+    # POST, lo hace cada usuario con SUS cámaras: ver mosaic_set.)
+    if path == "/api/mosaic" and method == "DELETE":
+        return True
     return False
 
 
@@ -667,6 +671,12 @@ def _user_allows(request: Request, device_id: str) -> bool:
     if u["role"] == "admin" or u.get("_kiosk"):   # kiosko local ve todas
         return True
     return device_id in set(u.get("cameras") or [])
+
+
+def _sees_all(request: Request) -> bool:
+    """Admin y kiosko local ven todas las cámaras."""
+    u = getattr(request.state, "user", None)
+    return bool(u) and (u["role"] == "admin" or bool(u.get("_kiosk")))
 
 
 def _require_camera(request: Request, device_id: str) -> None:
@@ -1166,9 +1176,18 @@ async def whep_offer(name: str, request: Request):
     del mismo origen, para que el navegador pueda hacerle DELETE al cerrar."""
     sname = safe_name(name)
     if sname == "mosaico":
-        # Mosaico del servidor: NO es un stream del inventario. Cualquier usuario
-        # autenticado puede leerlo (se compuso con SUS cámaras permitidas).
-        pass
+        # Mosaico del servidor: NO es un stream del inventario y es UNO solo para
+        # todos (un ffmpeg). Lo arma quien llamó último a POST /api/mosaic, así
+        # que puede contener cámaras que ESTE usuario no tiene: si es así, 403
+        # (el cliente debe volver a pedir su mosaico con POST /api/mosaic).
+        if not _sees_all(request):
+            names = server_mosaic.current_names()
+            if not names:
+                raise HTTPException(404, "mosaico no armado")
+            for n in names:
+                s = store.stream_by_mtx(n)
+                if s and not _user_allows(request, s["device_id"]):
+                    raise HTTPException(403, "el mosaico actual incluye cámaras que no tienes asignadas")
     else:
         # La ruta auxiliar del substream es "<primario>__lo": para el permiso se
         # busca por el nombre PRIMARIO (el __lo no es el mtx_name de ningún stream).
@@ -1667,6 +1686,10 @@ async def mosaic_set(request: Request, payload: dict = Body(default={})):
     N. Devuelve el whep del mosaico + las celdas (para etiquetas y para maximizar
     una cámara con su stream directo)."""
     cams = _published_cams(request)
+    if not cams and not _sees_all(request):
+        # Sin cámaras propias no hay nada que componer, y el mosaico es compartido:
+        # no dejar que alguien sin cámaras desmonte el de los demás.
+        raise HTTPException(403, "no tienes cámaras asignadas")
     try:
         layout = int(payload.get("layout") or 4)
         page = int(payload.get("page") or 0)
@@ -1680,8 +1703,9 @@ async def mosaic_set(request: Request, payload: dict = Body(default={})):
 
 
 @app.delete("/api/mosaic")
-async def mosaic_stop():
-    """Detiene el ffmpeg del mosaico y retira la ruta."""
+async def mosaic_stop(request: Request):
+    """Detiene el ffmpeg del mosaico y retira la ruta. Solo admin (afecta a todos)."""
+    _require_admin(request)
     await server_mosaic.stop(mtx)
     return {"ok": True}
 
