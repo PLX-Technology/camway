@@ -31,8 +31,88 @@
   // Cada entrada: { el, returnTo }
   const stack = [];
 
+  // ------------------------------------------------------- pantalla completa
+  // Con un elemento en pantalla completa (una teja, el muro o el DVR) nada fuera
+  // de él se ve, y los modales/diálogos viven en <body>: el botón «IA» parecía no
+  // hacer nada. Al abrirse la PRIMERA ventana se sale de pantalla completa
+  // recordando el elemento; al cerrarse la ÚLTIMA se vuelve a entrar en él.
+  // Genérico: vale para todo `.modal`, el login y uiPrompt/uiConfirm.
+  let fsEl = null;            // elemento que estaba en pantalla completa
+  let fsRestoreTimer = null;
+  let fsSwallowUntil = 0;     // hasta cuándo se traga el `fullscreenchange` de SALIDA provocado por esta función
+
+  // app.js reacciona a esa salida apagando el modo «ajustar» y devolviendo la teja
+  // a fotograma; como la salida es temporal, ese evento no debe llegar a app.js.
+  // Captura en window: corre antes que cualquier oyente de document.
+  window.addEventListener("fullscreenchange", (e) => {
+    if (fsSwallowUntil && performance.now() < fsSwallowUntil && !document.fullscreenElement) {
+      fsSwallowUntil = 0;
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
+  function suspendFullscreen(modal) {
+    clearTimeout(fsRestoreTimer);
+    const cur = document.fullscreenElement;
+    if (!cur || typeof document.exitFullscreen !== "function") return;
+    // Si la ventana está dentro del elemento a pantalla completa (o lo contiene) ya se ve.
+    if (modal && (cur.contains(modal) || modal.contains(cur))) return;
+    fsEl = cur;
+    fsSwallowUntil = performance.now() + 800;
+    document.exitFullscreen().catch(() => { fsSwallowUntil = 0; });
+  }
+
+  function scheduleFullscreenRestore() {
+    clearTimeout(fsRestoreTimer);
+    if (!fsEl) return;
+    // Espera corta: hay flujos que cierran una ventana y abren otra un instante después
+    // (IA → editor de zona, que primero carga un fotograma); así no se entra y sale de
+    // pantalla completa entre ambas. Si la otra tarda más, solo hay un parpadeo.
+    fsRestoreTimer = setTimeout(restoreFullscreen, 350);
+  }
+
+  function restoreFullscreen() {
+    pruneStack();
+    if (stack.length || !fsEl) return;
+    const el = fsEl;
+    fsEl = null;
+    if (!el.isConnected || document.fullscreenElement || typeof el.requestFullscreen !== "function") return;
+    el.requestFullscreen().catch(() => armFullscreenRetry(el));
+  }
+
+  // El navegador exige un gesto reciente para entrar en pantalla completa. Al cerrar
+  // con clic o con Guardar lo hay; con Escape no (no cuenta como activación). Entonces
+  // se reintenta en la siguiente pulsación o clic, durante 20 s.
+  let fsRetryArmed = false;
+  function armFullscreenRetry(el) {
+    if (fsRetryArmed) return;
+    fsRetryArmed = true;
+    const off = () => {
+      fsRetryArmed = false;
+      clearTimeout(timer);
+      document.removeEventListener("pointerdown", onGesture, true);
+      document.removeEventListener("keydown", onGesture, true);
+    };
+    const onGesture = (ev) => {
+      if (ev.type === "keydown" && ev.key === "Escape") return;
+      off();
+      if (el.isConnected && !document.fullscreenElement && !stack.length) {
+        el.requestFullscreen().catch(() => {});
+      }
+    };
+    const timer = setTimeout(off, 20000);
+    document.addEventListener("pointerdown", onGesture, true);
+    document.addEventListener("keydown", onGesture, true);
+  }
+
   function isShown(el) {
     return el.isConnected && !el.hidden && el.getAttribute("aria-hidden") !== "true";
+  }
+
+  // Defensa: una ventana oculta por otra vía (estilo, clase) que no pasó por `hidden`
+  // dejaría una entrada colgada y desactivaría la salida/entrada de pantalla completa.
+  function pruneStack() {
+    for (let i = stack.length - 1; i >= 0; i--) if (!isShown(stack[i].el)) stack.splice(i, 1);
   }
 
   function focusables(el) {
@@ -81,6 +161,9 @@
   function open(el) {
     if (stack.some((s) => s.el === el)) return;
     ensureAria(el);
+    pruneStack();
+    if (!stack.length) suspendFullscreen(el);
+    else clearTimeout(fsRestoreTimer);
     const prev = document.activeElement;
     stack.push({ el, returnTo: prev instanceof HTMLElement && prev !== document.body ? prev : null });
     // focus() fuerza el cálculo de estilos, no hace falta esperar al pintado
@@ -95,6 +178,7 @@
     const i = stack.findIndex((s) => s.el === el);
     if (i < 0) return;
     const [entry] = stack.splice(i, 1);
+    if (!stack.length) scheduleFullscreenRestore();
     // Solo devolver el foco si el modal cerrado era el de arriba y el foco quedó
     // en él (o se perdió en <body>); si no, otro código ya movió el foco a propósito.
     const active = document.activeElement;
