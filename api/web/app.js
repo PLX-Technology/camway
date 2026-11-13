@@ -3097,7 +3097,7 @@ async function loadHealth() {
     hsTile("CPU", h.cpu.pct.toFixed(0) + " %", `carga ${h.cpu.load.join(" / ")} · ${h.cpu.cores} núcleos`, h.cpu.pct, h.cpu.level),
     hsTile("Memoria", h.ram.pct.toFixed(0) + " %", `${h.ram.used_gb} de ${h.ram.total_gb} GB`, h.ram.pct, h.ram.level),
     hsTile("Disco", h.disk.pct.toFixed(0) + " %", `${h.disk.free_gb} GB libres de ${h.disk.total_gb}`, h.disk.pct, h.disk.level),
-    hsTile("Red", `↓ ${h.net.down_mbps} Mb/s`, `↑ ${h.net.up_mbps} Mb/s`, null, "ok"),
+    hsTile("Red (bajada)", `${h.net.down_mbps} Mb/s`, `subida ${h.net.up_mbps} Mb/s`, null, "ok"),
   );
   $("#hsTemps").replaceChildren(...h.sensors.map((s) => {
     const c = document.createElement("span");
@@ -3994,6 +3994,30 @@ function estimateSegLen(mtimes) {
   return { sec: gaps[Math.floor(gaps.length / 2)], measured: true };
 }
 
+// Hora de inicio (epoch, s) de un archivo continuo de MediaMTX: «%Y-%m-%d_%H-%M-%S-%f.mp4».
+// El nombre lleva la hora local del servidor; aquí se lee como hora de ESTE navegador y
+// nameShift() corrige la diferencia de zona horaria.
+function segStartFromName(name) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d+))?\.mp4$/i.exec(name || "");
+  if (!m) return null;
+  const sec = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() / 1000;
+  return m[7] ? sec + Number("0." + m[7]) : sec;
+}
+
+// `ds` = mtime − inicio leído del nombre (null si el nombre no se pudo leer). Si el servidor y
+// este navegador están en la misma zona, cada valor es la duración real (de 0 a 1 h). Si no,
+// todos salen corridos un múltiplo de 15 min: se deduce el corrimiento con el valor más
+// pequeño (siempre hay un tramo corto: el último, aún abierto) y se comprueba que con él
+// todas las duraciones tengan sentido. Devuelve el corrimiento en segundos, o null si no encaja.
+function nameShift(ds) {
+  const v = ds.filter((d) => d != null);
+  if (!v.length) return null;
+  const ok = (off) => v.every((d) => d - off > -2 && d - off <= 3600);
+  if (ok(0)) return 0;
+  const off = Math.floor((Math.min(...v) + 2) / 900) * 900;
+  return ok(off) ? off : null;
+}
+
 function eventLabel(name) {       // «2026-11-13_10-00-00_Persona_sin_casco.mp4» → «Persona sin casco»
   const m = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_(.+?)\.mp4$/i.exec(name || "");
   const raw = m ? m[1] : "";
@@ -4027,15 +4051,22 @@ async function fetchLocal(d, t0, t1) {
   const dev = encodeURIComponent(d.device_id);
   const fileUrl = (r) => `/api/recordings/${dev}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${encodeURIComponent(r.kind)}`;
   const conts = recs.filter((r) => r.kind !== "event").sort((a, b) => a.mtime - b.mtime);
+  // Inicio exacto: MediaMTX nombra cada archivo con su hora de inicio y `mtime`
+  // es la hora de fin. Si algún nombre no trae ese formato, ese tramo se estima.
+  const parsed = conts.map((r) => segStartFromName(r.name));
+  const shift = nameShift(conts.map((r, i) => (parsed[i] == null ? null : r.mtime - parsed[i])));
   const seg = estimateSegLen(conts.map((r) => r.mtime));
   let prevEnd = 0;
+  let nExact = 0, nEst = 0;
   const items = [];
-  for (const r of conts) {
-    const start = Math.max(r.mtime - seg.sec, prevEnd);
+  conts.forEach((r, i) => {
+    const exact = parsed[i] != null && shift != null;
+    const start = exact ? parsed[i] + shift : Math.max(r.mtime - seg.sec, prevEnd);
     prevEnd = r.mtime;
-    if (r.mtime < t0 || r.mtime >= t1) continue;
-    items.push({ kind: "cont", label: "", start, end: r.mtime, dur: 0, size: fmtSize(r.size), thumb: "", url: fileUrl(r), name: r.name, approx: true });
-  }
+    if (r.mtime <= t0 || start >= t1) return;          // fuera del día (los que cruzan medianoche cuentan)
+    if (exact) nExact++; else nEst++;
+    items.push({ kind: "cont", label: "", start, end: r.mtime, dur: 0, size: fmtSize(r.size), thumb: "", url: fileUrl(r), name: r.name, exact });
+  });
   recs.filter((r) => r.kind === "event" && r.mtime >= t0 && r.mtime < t1).forEach((r) => {
     items.push({ kind: "event", label: eventLabel(r.name), start: r.mtime, end: r.mtime, dur: 0, size: fmtSize(r.size), thumb: "", url: fileUrl(r), name: r.name });
   });
@@ -4045,8 +4076,9 @@ async function fetchLocal(d, t0, t1) {
   const hint = items.length
     ? `${nCont} tramo(s) continuo(s) y ${nEv} evento(s)${modeTxt ? " · " + modeTxt : ""}`
     : recDay === "today" ? "Grabando localmente; aún no hay archivos de hoy (o la grabación se activó hace poco)." : "";
-  const note = nCont
-    ? `La hora de fin de cada tramo es real; su duración se ${seg.measured ? "estima" : "supone"} en ~${Math.round(seg.sec / 60)} min, porque el servidor no la entrega.`
+  // Solo se avisa cuando hay tramos con duración estimada (nombre sin formato conocido).
+  const note = nEst
+    ? `${nExact ? "Algunos tramos" : "Los tramos"} no traen su hora de inicio en el nombre: su duración se ${seg.measured ? "estima" : "supone"} en ~${Math.round(seg.sec / 60)} min.`
     : "";
   return { items, hint, note };
 }
