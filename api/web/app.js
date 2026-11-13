@@ -197,12 +197,14 @@ $$(".tab").forEach((tab) => {
     $$(".view").forEach((v) => v.classList.remove("active"));
     tab.classList.add("active");
     $(`#view-${tab.dataset.view}`).classList.add("active");
-    if (tab.dataset.view === "mosaico") loadWall();
+    if (tab.dataset.view === "mosaico") enterWallView();
     if (tab.dataset.view === "grabaciones") loadRecDevices();
     if (tab.dataset.view === "ajustes") {
       if (isAdmin()) { loadUsers(); fillKiosk(); loadEncoding(); loadHealth(); }
       loadAlertPanel();
     }
+    // Fuera de la pestaña Mosaico el muro se detiene (sin fotogramas ni WebRTC).
+    if (tab.dataset.view !== "mosaico") syncWall();
   });
 });
 
@@ -629,169 +631,132 @@ function playAlarm() {
 
 // --------------------------------------------------------------- mosaico WHEP
 
-const RECONNECT_MAX_DELAY = 10000;   // techo del retroceso
-const STALL_TICKS = 3;               // ~6 s congelado (a 2 s por tick) => reconecta
+// El reproductor WebRTC es la clase compartida de whep.js (la usan también dvr.js,
+// live.js y tv.js). Aquí solo se fijan las opciones del mosaico y los textos.
+const WALL_WHEP_OPTS = {
+  watchdog: { everyMs: 2000, stallMs: 6000, minStep: 0.05 },   // ~6 s congelado => reconecta
+  retryDelay: WhepPlayer.backoff(10000),                       // 1 s, 2 s, 4 s … techo 10 s
+};
 
-class WhepPlayer {
-  constructor(url, video, onState) {
-    this.url = url;
-    this.video = video;
-    this.onState = onState || (() => {});
-    this.pc = null;
-    this.resource = null;      // URL de la sesión WHEP (para cerrarla en el servidor)
-    this.active = false;       // intención del usuario: quiere ver esta cámara
-    this.retry = 0;            // reconexiones consecutivas (0 = conexión limpia)
-    this.retryTimer = null;
-    this.watchdog = null;
-    this.lastTime = 0;
-    this.stalls = 0;
-  }
-
-  async start() {
-    this.active = true;
-    this.retry = 0;
-    await this._connect();
-  }
-
-  // Cambia entre el flujo ligero (lo) y el 3K (hi). Si está en vivo, reconecta.
-  setQuality(hi) {
-    const target = hi ? (this.urlHi || this.url) : (this.urlLo || this.url);
-    if (!target || target === this.url) return;
-    this.url = target;
-    if (this.active) { this.retry = 0; this._connect(); }
-  }
-
-  async _connect() {
-    this._teardownPc();
-    if (!this.active) return;
-    this.onState(this.retry ? `reconectando (${this.retry})` : "conectando");
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [] });
-      this.pc = pc;
-      pc.addTransceiver("video", { direction: "recvonly" });
-      pc.addTransceiver("audio", { direction: "recvonly" });
-
-      pc.ontrack = (ev) => {
-        if (this.pc !== pc) return;
-        this.video.srcObject = ev.streams[0];
-        this.video.play().catch(() => {});
-        this.retry = 0;
-        this.onState("en vivo");
-        this._startWatchdog();
-      };
-      pc.onconnectionstatechange = () => {
-        if (!this.active || this.pc !== pc) return;
-        if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
-          this._scheduleReconnect();
-        }
-      };
-
-      await pc.setLocalDescription(await pc.createOffer());
-      await this.gatherIce(pc);
-      if (!this.active || this.pc !== pc) return;
-
-      // MediaMTX admite WHEP sin trickle: se manda la oferta ya completa.
-      const res = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: pc.localDescription.sdp,
-      });
-      if (!res.ok) throw new Error(`WHEP ${res.status}`);
-      // URL de la sesión: hay que hacerle DELETE al cerrar, si no MediaMTX
-      // deja la sesión viva (zombi) y se acumulan → CPU y lag.
-      const loc = res.headers.get("Location");
-      if (loc) { try { this.resource = new URL(loc, window.location.href).href; } catch (_) {} }
-      const answer = await res.text();
-      if (!this.active || this.pc !== pc) return;
-      await pc.setRemoteDescription({ type: "answer", sdp: answer });
-    } catch (err) {
-      if (this.active) this._scheduleReconnect();
-    }
-  }
-
-  // Vigila que el video avance; si se congela (MediaMTX perdió la cámara pero
-  // la conexión sigue "viva"), fuerza la reconexión.
-  _startWatchdog() {
-    this._stopWatchdog();
-    this.lastTime = this.video.currentTime;
-    this.stalls = 0;
-    this.watchdog = setInterval(() => {
-      if (!this.active || !this.pc) return;
-      const t = this.video.currentTime;
-      if (t > this.lastTime + 0.05) {
-        this.lastTime = t;
-        this.stalls = 0;
-      } else if (++this.stalls >= STALL_TICKS) {
-        this._scheduleReconnect();
-      }
-    }, 2000);
-  }
-
-  _stopWatchdog() {
-    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
-  }
-
-  _scheduleReconnect() {
-    if (!this.active || this.retryTimer) return;   // ya hay una en cola
-    this._stopWatchdog();
-    this._teardownPc();
-    this.retry++;
-    const delay = Math.min(1000 * 2 ** (this.retry - 1), RECONNECT_MAX_DELAY);
-    this.onState("sin conexión · reintentando…");
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      this._connect();
-    }, delay);
-  }
-
-  _teardownPc() {
-    if (this.pc) {
-      try { this.pc.close(); } catch (_) {}
-      this.pc = null;
-    }
-    if (this.resource) {
-      // Cierra la sesión en MediaMTX (si no, queda zombi consumiendo CPU).
-      try { fetch(this.resource, { method: "DELETE", keepalive: true }).catch(() => {}); } catch (_) {}
-      this.resource = null;
-    }
-    if (this.video) this.video.srcObject = null;
-  }
-
-  gatherIce(pc) {
-    return new Promise((resolve) => {
-      if (pc.iceGatheringState === "complete") return resolve();
-      const done = () => {
-        if (pc.iceGatheringState === "complete") {
-          pc.removeEventListener("icegatheringstatechange", done);
-          resolve();
-        }
-      };
-      pc.addEventListener("icegatheringstatechange", done);
-      // Red local: si algún candidato se atasca, no vale la pena esperarlo.
-      setTimeout(resolve, 1500);
-    });
-  }
-
-  stop() {   // parada manual: no reconecta
-    this.active = false;
-    this.retry = 0;
-    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
-    this._stopWatchdog();
-    this._teardownPc();
+function whepStateText(state, n) {
+  switch (state) {
+    case "connecting": return "conectando";
+    case "reconnecting": return `reconectando (${n})`;
+    case "live": return "en vivo";
+    case "novideo": return "sin vídeo";
+    default: return "sin conexión · reintentando…";
   }
 }
 
-async function loadWall(autostart = true) {
+// ---- ciclo de vida del muro ----
+// El muro corre (fotogramas, WebRTC, gobernadores) SOLO si se ve: pestaña
+// Mosaico activa, DVR cerrado y sin «Pausar» manual. syncWall() deriva ese
+// estado y arranca o detiene; se llama desde la navegación, el DVR
+// (window.CamWayWall.sync) y los botones, así no hay carreras entre ellos.
+let wallGen = 0;              // generación de loadWall: descarta respuestas viejas
+let wallRunning = false;      // hay refresco / vídeo corriendo ahora
+let wallUserPaused = false;   // «Pausar» pulsado a mano
+let wallSig = null;           // firma de las tejas del último loadWall
+
+// ¿El muro está tapado (otra pestaña o DVR abierto)? Nada debe pedir imagen.
+function wallOffscreen() {
+  return document.body.classList.contains("dvr-open") ||
+    !$("#view-mosaico")?.classList.contains("active");
+}
+
+function startWallFeeds() {
+  if (liveMosaic) startLiveMosaic();
+  else startSnapRefresh();
+}
+
+// ¿Esta teja necesita su vídeo en vivo para la IA del navegador? (con el
+// detector del servidor activo, no: él procesa y el navegador solo recibe SSE.)
+function keepLiveForAi(c) {
+  return !state.serverDetection && !!(c.config && c.config.enabled);
+}
+
+// Detiene refresco, gobernadores y WebRTC SIN destruir las tejas. Con el muro
+// solo TAPADO (otra pestaña / DVR) las tejas en vivo con IA del navegador se
+// conservan: la IA sigue detectando (decisión del usuario). Con «Pausar» manual
+// se corta todo.
+function suspendWall() {
+  wallRunning = false;
+  stopSnapRefresh();
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (qTimer) { clearInterval(qTimer); qTimer = null; }
+  const conservarIa = wallOffscreen() && !wallUserPaused;
+  state.tiles.forEach((c) => { if (!(conservarIa && keepLiveForAi(c))) dropLive(c); });
+}
+
+function resumeWall() {
+  wallRunning = true;
+  startWallFeeds();
+  const big = enlargedCtrl();       // una ampliada (p. ej. por alarma) vuelve a vídeo
+  if (big) goLive(big);
+}
+
+function syncWall() {
+  const want = state.tiles.size > 0 && !wallUserPaused && !wallOffscreen();
+  if (want && !wallRunning) resumeWall();
+  else if (!want && wallRunning) suspendWall();
+}
+
+// Al volver a la pestaña Mosaico: si las cámaras no cambiaron, solo se reanuda
+// (las tejas siguen montadas); si cambiaron o nunca cargó bien, se reconstruye.
+async function enterWallView() {
+  wallUserPaused = false;
+  if (wallSig === null) return loadWall();
+  try {
+    const d = await api("/api/wall");
+    if (JSON.stringify(d.tiles) !== wallSig) return loadWall();
+  } catch (_) { /* sin red: se reanuda con lo que hay */ }
+  syncWall();
+}
+window.CamWayWall = { sync: syncWall };   // lo usa dvr.js al abrir/cerrar
+
+// Tras un cambio hecho en sitio (PTZ) se actualiza la firma sin reconstruir.
+async function refreshWallSig() {
+  try { wallSig = JSON.stringify((await api("/api/wall")).tiles); } catch (_) { wallSig = null; }
+}
+
+// Mensaje dentro del muro (cargando / error) en lugar de «No hay streams
+// publicados», que solo es verdad cuando la API contestó con 0 cámaras.
+function showWallMessage(html) {
+  const wall = $("#wall");
+  wall.classList.remove("fit");
+  wall.innerHTML = `<p class="empty" role="status">${html}</p>`;
+  return wall.firstElementChild;
+}
+
+function showWallError(err) {
+  const p = showWallMessage(`No se pudo cargar el muro: ${esc(err && err.message || err)} `
+    + `<button class="ghost" data-wall-retry>Reintentar</button>`);
+  p.setAttribute("role", "alert");
+  p.querySelector("[data-wall-retry]").addEventListener("click", () => loadWall());
+}
+
+async function loadWall() {
+  const gen = ++wallGen;
+  const hadWall = state.tiles.size > 0;
+  $("#emptyWall").hidden = true;    // mientras carga no se afirma «no hay cámaras»
+  if (!hadWall) showWallMessage("Cargando cámaras…");
   let data;
   try {
     data = await api("/api/wall");
   } catch (err) {
-    return toast(err.message, true);
+    if (gen !== wallGen) return;
+    // Con un muro ya montado se conserva y se avisa; sin muro, mensaje con reintento.
+    if (hadWall) toast("No se pudo recargar el muro: " + err.message, true);
+    else showWallError(err);
+    return;
   }
+  if (gen !== wallGen) return;      // otra carga más reciente tomó el relevo
+  wallUserPaused = false;           // recargar reanuda, como siempre
 
   // Traer la disposición del usuario desde el servidor la primera vez (persiste
   // entre equipos). Luego saveLayout mantiene la caché al día.
   if (serverLayout === null) await fetchLayout();
+  if (gen !== wallGen) return;
 
   // El navegador refresca los fotogramas al ritmo que produce el servidor.
   // Ritmo de poll = el del servidor. En modo ligero NO se topa: la máquina
@@ -804,6 +769,7 @@ async function loadWall(autostart = true) {
     : "MediaMTX no responde: el mosaico no podrá conectar.";
   $("#emptyWall").hidden = data.tiles.length > 0;
 
+  wallSig = JSON.stringify(data.tiles);
   stopWall();
   const wall = $("#wall");
   wall.innerHTML = "";
@@ -833,6 +799,7 @@ async function loadWall(autostart = true) {
   //    corre el modelo; recibe las detecciones por SSE.
   try { state.serverDetection = (await api("/api/health")).detector; } catch (_) {}
   await applyServerConfigs();
+  if (gen !== wallGen) return;
   openDetectionStream();
   startAlarmSweeper();
 
@@ -844,10 +811,7 @@ async function loadWall(autostart = true) {
   liveMosaic = def === "live" ||
     (def === "auto" && data.tiles.length > 0 && data.tiles.length <= LIVE_MOSAIC_MAX);
   applyMosaicModeBtn();
-  if (autostart) {
-    if (liveMosaic) startLiveMosaic();
-    else startSnapRefresh();
-  }
+  syncWall();     // arranca solo si el muro se ve (no bajo otra pestaña ni el DVR)
 }
 
 // Mosaico en vivo: todas las tejas a vídeo WebRTC (substream ligero); al
@@ -863,13 +827,14 @@ function startLiveMosaic() {
   snapTimer = setInterval(snapTick, Math.max(700, qEffMs()));
 }
 
-// Crea una teja (video + player + IA + arrastre) y devuelve {el, ctrl}.
-function makeTile(tile) {
-  const el = document.createElement("div");
-  el.className = "tile";
-  el.dataset.streamId = tile.stream_id;
-  el.draggable = true;
-  el.innerHTML = `
+// ---- teja del mosaico: se arma en piezas con nombre (HTML, reproductor, audio,
+// hablar, estado, ampliar, arrastre, botones de admin, PTZ). makeTile las une.
+
+// HTML interno de una teja. Todo dato de la API va por esc() (los nombres y los
+// banners los escribe cualquier equipo de la LAN).
+function tileHtml(tile) {
+  const admin = isAdmin();
+  return `
     <img class="snap" alt="">
     <video playsinline muted></video>
     <canvas class="detoverlay"></canvas>
@@ -878,74 +843,104 @@ function makeTile(tile) {
     <div class="schedtag">⏰ horario</div>
     <div class="tilestate"><div class="spinner"></div><span>en espera</span></div>
     <div class="ptzpad" hidden>
-      <button class="ptzbtn up" data-ptz="up" title="Arriba">▲</button>
-      <button class="ptzbtn left" data-ptz="left" title="Izquierda">◀</button>
-      <button class="ptzbtn right" data-ptz="right" title="Derecha">▶</button>
-      <button class="ptzbtn down" data-ptz="down" title="Abajo">▼</button>
-      ${tile.zoom ? `<button class="ptzbtn zoomin" data-ptz="zoomin" title="Acercar (zoom +)">＋</button>
-      <button class="ptzbtn zoomout" data-ptz="zoomout" title="Alejar (zoom −)">－</button>` : ""}
+      <button class="ptzbtn up" data-ptz="up" title="Arriba" aria-label="Mover cámara arriba">▲</button>
+      <button class="ptzbtn left" data-ptz="left" title="Izquierda" aria-label="Mover cámara a la izquierda">◀</button>
+      <button class="ptzbtn right" data-ptz="right" title="Derecha" aria-label="Mover cámara a la derecha">▶</button>
+      <button class="ptzbtn down" data-ptz="down" title="Abajo" aria-label="Mover cámara abajo">▼</button>
+      ${tile.zoom ? `<button class="ptzbtn zoomin" data-ptz="zoomin" title="Acercar (zoom +)" aria-label="Acercar (zoom óptico)">＋</button>
+      <button class="ptzbtn zoomout" data-ptz="zoomout" title="Alejar (zoom −)" aria-label="Alejar (zoom óptico)">－</button>` : ""}
     </div>
     <div class="tilebar">
-      <span class="draghandle" title="Arrastrar">⠿</span>
-      <span class="t">${tile.title}</span>
-      <span class="chip">${tile.codec}</span>
-      ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio">🔇</button>` : ""}
-      ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)">🎙️</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local">⏺</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)">⚡</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}">🕹</button>` : ""}
-      <button class="ghost small ai" data-ai title="Comportamiento IA"><span class="dotai"></span>IA</button>
+      <span class="draghandle" title="Arrastrar" aria-hidden="true">⠿</span>
+      <span class="t">${esc(tile.title)}</span>
+      <span class="chip">${esc(tile.codec)}</span>
+      ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio" aria-label="Oír el audio de la cámara" aria-pressed="false">🔇</button>` : ""}
+      ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)" aria-label="Hablar por el altavoz de la cámara (mantén pulsado)">🎙️</button>` : ""}
+      ${admin ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local" aria-label="Grabación local de la cámara">⏺</button>` : ""}
+      ${admin ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)" aria-label="Optimizar para tiempo real">⚡</button>` : ""}
+      ${admin ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}" aria-label="Activar o desactivar el PTZ">🕹</button>` : ""}
+      <button class="ghost small ai" data-ai title="Comportamiento IA" aria-label="Comportamiento IA de la cámara"><span class="dotai"></span>IA</button>
       <button class="ghost small" data-play>Ver</button>
     </div>`;
+}
 
-  const video = el.querySelector("video");
-  const snap = el.querySelector("img.snap");
+// Elemento de la teja: enfocable con Tab, Enter la amplía/restaura (igual que el
+// doble clic) y Escape restaura una ampliada dentro de la página.
+function createTileElement(tile) {
+  const el = document.createElement("div");
+  el.className = "tile";
+  el.dataset.streamId = tile.stream_id;
+  el.draggable = true;
+  el.tabIndex = 0;
+  el.setAttribute("role", "group");
+  el.setAttribute("aria-label", `Cámara ${tile.title}`);
+  el.innerHTML = tileHtml(tile);
+  return el;
+}
+
+// Reproductor WebRTC de la teja: flujo ligero por defecto, alto al ampliar.
+function createTilePlayer(tile, video) {
+  const player = new WhepPlayer(tile.whep, video, WALL_WHEP_OPTS);
+  player.urlLo = tile.whep;                      // substream ligero (por defecto)
+  player.urlHi = tile.whep_hi || tile.whep;      // 3K para pantalla completa
+  return player;
+}
+
+// Audio: el <video> arranca muteado (política de autoplay). Al pulsar 🔇/🔊
+// —gesto de usuario— se desmutea y suena el audio de la cámara (solo las
+// que publican G.711/PCMA; las AAC no traen este botón). Solo una cámara
+// con sonido a la vez para no mezclar varias.
+function wireTileAudio(el, tile, video, player) {
+  const muteBtn = el.querySelector("[data-mute]");
+  if (!muteBtn) return;
+  muteBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const on = video.muted;               // se va a encender
+    if (on) {
+      state.players.forEach((p, sid) => {  // silenciar las demás
+        if (sid !== tile.stream_id && p.video) { p.video.muted = true; }
+      });
+      document.querySelectorAll("[data-mute]").forEach((b) => {
+        b.textContent = "🔇"; b.setAttribute("aria-pressed", "false");
+      });
+      if (!player.active) { const c = state.tiles.get(tile.stream_id); if (c) goLive(c); }
+    }
+    video.muted = !on;
+    video.volume = 1;
+    muteBtn.textContent = on ? "🔊" : "🔇";
+    muteBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+// Push-to-talk: mantener pulsado 🎙️ habla por el altavoz de la cámara.
+function wireTileTalk(el, tile) {
+  const talkBtn = el.querySelector("[data-talk]");
+  if (!talkBtn) return;
+  const press = (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    startTalk(tile.stream_id, talkBtn);
+  };
+  const release = (ev) => { if (ev) ev.stopPropagation(); stopTalk(); };
+  talkBtn.addEventListener("pointerdown", press);
+  talkBtn.addEventListener("pointerup", release);
+  talkBtn.addEventListener("pointerleave", release);
+  talkBtn.addEventListener("pointercancel", release);
+  talkBtn.addEventListener("click", (ev) => ev.stopPropagation());
+}
+
+// Texto y nombre accesible del botón Ver/Parar según si el vídeo está activo.
+function refreshPlayBtn(el, title, player) {
+  const btn = el.querySelector("[data-play]");
+  if (!btn) return;
+  btn.textContent = player.active ? "Parar" : "Ver";
+  btn.setAttribute("aria-label", `${player.active ? "Parar el vídeo de" : "Ver en vivo"} ${title}`);
+}
+
+// Estado de conexión sobre la teja y botón Ver/Parar.
+function wireTileState(el, tile, player) {
   const stateEl = el.querySelector(".tilestate");
   const label = stateEl.querySelector("span");
   const btn = el.querySelector("[data-play]");
-  const aiBtn = el.querySelector("[data-ai]");
-  const muteBtn = el.querySelector("[data-mute]");
-  const alertEl = el.querySelector(".aialert");
-  const player = new WhepPlayer(tile.whep, video, null);
-  player.urlLo = tile.whep;                      // substream ligero (por defecto)
-  player.urlHi = tile.whep_hi || tile.whep;      // 3K para pantalla completa
-
-  // Audio: el <video> arranca muteado (política de autoplay). Al pulsar 🔇/🔊
-  // —gesto de usuario— se desmutea y suena el audio de la cámara (solo las
-  // que publican G.711/PCMA; las AAC no traen este botón). Solo una cámara
-  // con sonido a la vez para no mezclar varias.
-  if (muteBtn) {
-    muteBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const on = video.muted;               // se va a encender
-      if (on) {
-        state.players.forEach((p, sid) => {  // silenciar las demás
-          if (sid !== tile.stream_id && p.video) { p.video.muted = true; }
-        });
-        document.querySelectorAll("[data-mute]").forEach((b) => (b.textContent = "🔇"));
-        if (!player.active) { const c = state.tiles.get(tile.stream_id); if (c) goLive(c); }
-      }
-      video.muted = !on;
-      video.volume = 1;
-      muteBtn.textContent = on ? "🔊" : "🔇";
-    });
-  }
-
-  // Push-to-talk: mantener pulsado 🎙️ habla por el altavoz de la cámara.
-  const talkBtn = el.querySelector("[data-talk]");
-  if (talkBtn) {
-    const press = (ev) => {
-      ev.stopPropagation(); ev.preventDefault();
-      startTalk(tile.stream_id, talkBtn);
-    };
-    const release = (ev) => { if (ev) ev.stopPropagation(); stopTalk(); };
-    talkBtn.addEventListener("pointerdown", press);
-    talkBtn.addEventListener("pointerup", release);
-    talkBtn.addEventListener("pointerleave", release);
-    talkBtn.addEventListener("pointercancel", release);
-    talkBtn.addEventListener("click", (ev) => ev.stopPropagation());
-  }
-
   const setState = (text) => {
     const live = text === "en vivo";
     stateEl.classList.toggle("oculto", live);
@@ -954,9 +949,9 @@ function makeTile(tile) {
       const trabajando = text === "conectando" || text.startsWith("reconectando");
       stateEl.querySelector(".spinner").style.display = trabajando ? "" : "none";
     }
-    btn.textContent = player.active ? "Parar" : "Ver";
+    refreshPlayBtn(el, tile.title, player);
   };
-  player.onState = setState;
+  player.onState = (st, n) => setState(whepStateText(st, n));
   state.players.set(tile.stream_id, player);
 
   btn.addEventListener("click", () => {
@@ -964,7 +959,12 @@ function makeTile(tile) {
     if (!c) return;
     if (c.live) goSnap(c); else goLive(c);
   });
-  el.addEventListener("dblclick", () => {
+  stateEl.classList.add("oculto");   // en fotograma no hay spinner de conexión
+}
+
+// Ampliar/restaurar: doble clic, Enter o Escape.
+function wireTileEnlarge(el, tile) {
+  const toggleEnlarge = () => {
     const c = state.tiles.get(tile.stream_id);
     if (!c) return;
     if (c.el.classList.contains("maximized")) {
@@ -977,10 +977,18 @@ function makeTile(tile) {
     } else {
       toggleFullscreen(el);    // vista normal: pantalla completa del SO
     }
+  };
+  el.addEventListener("dblclick", toggleEnlarge);
+  el.addEventListener("keydown", (e) => {
+    if (e.target !== el) return;               // Enter sobre un botón hace su propia acción
+    if (e.key === "Enter") { e.preventDefault(); toggleEnlarge(); }
+    else if (e.key === "Escape" && el.classList.contains("maximized")) { e.preventDefault(); toggleEnlarge(); }
   });
+}
 
-  // Arrastre de la teja (mueve el nodo, el video no se corta). En vista
-  // ampliada/pantalla completa, arrastrar es para DESPLAZAR el zoom, no reordenar.
+// Arrastre de la teja (mueve el nodo, el video no se corta). En vista
+// ampliada/pantalla completa, arrastrar es para DESPLAZAR el zoom, no reordenar.
+function wireTileDrag(el, tile) {
   el.addEventListener("dragstart", (e) => {
     if (el.classList.contains("maximized") || document.fullscreenElement === el) {
       e.preventDefault();
@@ -994,11 +1002,18 @@ function makeTile(tile) {
     el.classList.remove("dragging");
     $$(".zonebox.dragover").forEach((z) => z.classList.remove("dragover"));
   });
+}
 
-  const ctrl = {
+// Controlador de la teja: lo que el resto del panel (IA, zoom, alarmas, refresco)
+// lee y escribe.
+function createTileCtrl(tile, el, video, player) {
+  return {
     streamId: tile.stream_id,
     title: tile.title,
-    el, video, snap, player, aiBtn, alertEl,
+    el, video, player,
+    snap: el.querySelector("img.snap"),
+    aiBtn: el.querySelector("[data-ai]"),
+    alertEl: el.querySelector(".aialert"),
     frameUrl: tile.frame || `/api/wall/${tile.stream_id}/frame`,
     // Dimensiones de referencia para el overlay cuando el vídeo no corre
     // (las cajas del detector llegan normalizadas 0..1).
@@ -1014,12 +1029,10 @@ function makeTile(tile) {
     lastDetections: [],   // detecciones normalizadas del último análisis
     zoom: { s: 1, x: 0, y: 0 },   // zoom digital en la vista ampliada
   };
-  stateEl.classList.add("oculto");   // en fotograma no hay spinner de conexión
-  refreshAiButton(ctrl);
-  refreshZoneTag(ctrl);
-  refreshSchedTag(ctrl);
-  aiBtn.addEventListener("click", () => openAiModal(ctrl));
+}
 
+// Botones de la barra solo para admin: grabación local y optimizar tiempo real.
+function wireTileAdminButtons(el, tile) {
   const recBtn = el.querySelector("[data-rec]");
   if (recBtn) recBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -1040,51 +1053,82 @@ function makeTile(tile) {
       optBtn.classList.remove("busy");
     }
   });
+}
 
-  // Ajuste por cámara: activar/desactivar PTZ (ONVIF). Solo admin.
-  const ptzCfgBtn = el.querySelector("[data-ptzcfg]");
-  if (ptzCfgBtn) ptzCfgBtn.addEventListener("click", async (ev) => {
+// PTZ: botón de admin para activar/desactivar (se aplica en sitio, sin rehacer
+// el muro) y flechas visibles solo si la cámara tiene PTZ activado.
+function wireTilePtz(el, tile) {
+  const pad = el.querySelector(".ptzpad");
+  const cfgBtn = el.querySelector("[data-ptzcfg]");
+  const paintPtz = () => {
+    pad.hidden = !tile.ptz;
+    if (!cfgBtn) return;
+    cfgBtn.classList.toggle("ptzon", !!tile.ptz);
+    cfgBtn.title = tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)";
+  };
+  if (cfgBtn) cfgBtn.addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const enabling = !tile.ptz;
-    if (!enabling && !confirm(`¿Desactivar el PTZ de "${tile.title}"?`)) return;
-    ptzCfgBtn.classList.add("busy");
+    if (!enabling && !(await uiConfirm(`¿Desactivar el PTZ de "${tile.title}"?`, { okLabel: "Desactivar", danger: true }))) return;
+    cfgBtn.classList.add("busy");
     try {
       await api(`/api/devices/${tile.device_id}/ptz-config`, {
         method: "PUT", body: JSON.stringify({ enabled: enabling }) });
+      tile.ptz = enabling;
+      paintPtz();
       toast(enabling ? "PTZ activado." : "PTZ desactivado.");
-      await loadWall();      // refresca el mosaico para mostrar/ocultar las flechas
+      refreshWallSig();      // la firma del muro refleja el cambio: no hay recarga al volver
     } catch (e) {
       toast("PTZ: " + e.message, true);
-      ptzCfgBtn.classList.remove("busy");
+    } finally {
+      cfgBtn.classList.remove("busy");
     }
   });
 
-  // Controles PTZ (solo cámaras con PTZ): MANTENER PULSADO mueve de forma
-  // continua y suave; al soltar se detiene. Un toque corto = micro-movimiento.
-  if (tile.ptz) {
-    const pad = el.querySelector(".ptzpad");
-    pad.hidden = false;
-    pad.querySelectorAll("[data-ptz]").forEach((b) => {
-      // Movimiento POR PASOS: cada clic = mover+detener en la MISMA petición del
-      // servidor. El stop siempre ocurre → es imposible que la cámara quede
-      // girando sin control (estas genéricas ignoran el Timeout ONVIF, así que
-      // NO usamos 'mantener pulsado'). Para mover más, se pulsa varias veces.
-      const dir = b.dataset.ptz;
-      b.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (b.classList.contains("busy")) return;
-        b.classList.add("busy");
-        try { await api(`/api/streams/${tile.stream_id}/ptz?dir=${dir}`); }
-        catch (err) { toast("PTZ: " + err.message, true); }
-        finally { setTimeout(() => b.classList.remove("busy"), 120); }
-      });
+  paintPtz();
+  pad.querySelectorAll("[data-ptz]").forEach((b) => {
+    // Movimiento POR PASOS: cada clic = mover+detener en la MISMA petición del
+    // servidor. El stop siempre ocurre → es imposible que la cámara quede
+    // girando sin control (estas genéricas ignoran el Timeout ONVIF, así que
+    // NO usamos 'mantener pulsado'). Para mover más, se pulsa varias veces.
+    const dir = b.dataset.ptz;
+    b.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (b.classList.contains("busy")) return;
+      b.classList.add("busy");
+      try { await api(`/api/streams/${tile.stream_id}/ptz?dir=${dir}`); }
+      catch (err) { toast("PTZ: " + err.message, true); }
+      finally { setTimeout(() => b.classList.remove("busy"), 120); }
     });
-    el.addEventListener("dblclick", (e) => {   // no maximizar al usar el pad
-      if (e.target.closest(".ptzpad")) e.stopPropagation();
-    }, true);
-  }
+  });
+  el.addEventListener("dblclick", (e) => {   // no maximizar al usar el pad
+    if (e.target.closest(".ptzpad")) e.stopPropagation();
+  }, true);
+}
+
+// Crea una teja (video + player + IA + arrastre) y devuelve {el, ctrl}.
+function makeTile(tile) {
+  const el = createTileElement(tile);
+  const video = el.querySelector("video");
+  const player = createTilePlayer(tile, video);
+
+  wireTileAudio(el, tile, video, player);
+  wireTileTalk(el, tile);
+  wireTileState(el, tile, player);
+  wireTileEnlarge(el, tile);
+  wireTileDrag(el, tile);
+
+  const ctrl = createTileCtrl(tile, el, video, player);
+  refreshAiButton(ctrl);
+  refreshZoneTag(ctrl);
+  refreshSchedTag(ctrl);
+  ctrl.aiBtn.addEventListener("click", () => openAiModal(ctrl));
+
+  wireTileAdminButtons(el, tile);
+  wireTilePtz(el, tile);
 
   setupZoom(ctrl);
+  observeTileVisibility(ctrl);
   state.tiles.set(tile.stream_id, ctrl);
   if (ctrl.config.enabled) aiEngine.register(ctrl);
   return { el, ctrl };
@@ -1169,7 +1213,7 @@ function makeZoneBox(zone) {
   const isDefault = zone.id === "default";
   box.innerHTML = `
     <div class="zonehead">
-      <input class="zname" spellcheck="false">
+      <input class="zname" spellcheck="false" aria-label="Nombre de la zona">
       <span class="zcount"></span>
       <span class="zspacer"></span>
       ${isDefault ? "" : '<button class="ghost small" data-zfit title="Cuando está activo, esta zona NO aparece en «Ajustar a pantalla» del monitor principal; solo en su propia ventana.">▦ Solo su ventana</button>'}
@@ -1273,8 +1317,8 @@ function updateZoneCount(box) {
   box.querySelector(".zcount").textContent = n === 1 ? "1 cámara" : `${n} cámaras`;
 }
 
-function addZone() {
-  const name = prompt("Nombre de la zona", "Nueva zona");
+async function addZone() {
+  const name = await uiPrompt("Nombre de la zona", { value: "Nueva zona", okLabel: "Crear" });
   if (name === null) return;
   const box = makeZoneBox({ id: "z" + Date.now().toString(36), name: name || "Zona", cams: [] });
   $("#wall").appendChild(box);
@@ -1456,7 +1500,11 @@ function toggleFullscreen(el) {
 }
 
 function stopWall() {
+  wallRunning = false;
+  if (tileObserver) tileObserver.disconnect();   // las tejas se van a rehacer
   stopSnapRefresh();
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  if (qTimer) { clearInterval(qTimer); qTimer = null; }
   state.players.forEach((p) => p.stop());
   state.players.clear();
   state.tiles.forEach((c) => aiEngine.unregister(c));
@@ -1478,7 +1526,9 @@ $("#btnLight").addEventListener("click", () => {
   lightMode = !lightMode;
   try { localStorage.setItem("camway.light", lightMode ? "1" : "0"); } catch (_) {}
   applyLightBtn();
-  loadWall();   // re-aplica el ritmo y el tamaño de fotograma
+  // El ritmo y el ancho del fotograma se leen en cada petición: basta reiniciar
+  // el temporizador, sin tocar las tejas.
+  if (wallRunning) startWallFeeds();
   toast(lightMode ? "Modo ligero activado (este equipo)" : "Modo ligero desactivado");
 });
 applyLightBtn();
@@ -1515,7 +1565,18 @@ $("#btnMosaicMode")?.addEventListener("click", () => {
   toast(mosaicChoice === "live"
     ? "Mosaico en vídeo en vivo (fluido; ideal para pocas cámaras)"
     : "Mosaico en fotogramas (ligero; ideal para muchas cámaras)");
-  loadWall();   // re-arma el mosaico en el modo elegido
+  // Cambio en sitio: las tejas se conservan; solo se sube/baja el vídeo.
+  liveMosaic = mosaicChoice === "live";
+  applyMosaicModeBtn();
+  if (wallRunning) {
+    if (!liveMosaic) {
+      state.tiles.forEach((c) => { if (!_zoomActive(c.el)) dropLive(c); });
+      autoLiveSet = new Set();
+    }
+    startWallFeeds();
+    const big = enlargedCtrl();
+    if (big) goLive(big);
+  }
 });
 
 // ---- comandos de kiosco para el equipo cliente (Ajustes) ----
@@ -1552,15 +1613,15 @@ document.addEventListener("click", (e) => {
   });
 });
 
-$("#btnWallStart").addEventListener("click", () => { if (liveMosaic) startLiveMosaic(); else startSnapRefresh(); });
+$("#btnWallStart").addEventListener("click", () => {
+  wallUserPaused = false;
+  if (wallRunning) startWallFeeds();   // ya corría: reinicia el ritmo
+  else syncWall();
+});
 $("#btnWallStop").addEventListener("click", () => {
-  stopSnapRefresh();
-  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-  // Pausa de verdad: corta el WebRTC aunque estemos en mosaico en vivo.
-  state.tiles.forEach((c) => {
-    if (c.live) { c.live = false; c.videoReady = false;
-      c.el.classList.remove("live", "videoready"); c.player.stop(); }
-  });
+  // Pausa de verdad: corta fotogramas y WebRTC aunque estemos en mosaico en vivo.
+  wallUserPaused = true;
+  syncWall();
 });
 
 $("#cols").addEventListener("change", applyColumns);
@@ -1986,11 +2047,13 @@ function refDims(ctrl) {
 // sigue visible y refrescándose hasta que el vídeo tiene su primer frame, para
 // que no haya pantalla negra durante el arranque de WebRTC.
 function goLive(ctrl) {
-  if (ctrl.live) return;
+  // Con el muro tapado no se abre vídeo, salvo que la IA del navegador lo necesite.
+  if (ctrl.live || (wallOffscreen() && !keepLiveForAi(ctrl))) return;
   ctrl.live = true;
   ctrl.videoReady = false;
   ctrl.el.classList.add("live");
   ctrl.player.start();
+  refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
   waitVideoFrame(ctrl);
 }
 
@@ -2024,12 +2087,19 @@ function goSnap(ctrl) {
     return;
   }
   if (!ctrl.live) return;
+  dropLive(ctrl);
+  bumpSnap(ctrl);   // refresca el fotograma de inmediato al volver
+}
+
+// Corta el vídeo WebRTC de una teja y la deja en modo fotograma (sin pedir uno).
+function dropLive(ctrl) {
+  if (!ctrl.live && !ctrl.player.active) return;
   ctrl.live = false;
   ctrl.videoReady = false;
   ctrl.el.classList.remove("live", "videoready");
   ctrl.player.stop();
+  refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
   ctrl.el.querySelector(".tilestate")?.classList.add("oculto");
-  bumpSnap(ctrl);   // refresca el fotograma de inmediato al volver
 }
 
 // ---------------- refresco del mosaico por fotogramas ----------------
@@ -2038,27 +2108,73 @@ function goSnap(ctrl) {
 // los espectadores), así que esto es baratísimo aunque miren varias personas.
 let snapTimer = null;
 
+// Un fotograma que no responde NO puede dejar la teja congelada y sin aviso:
+// cada petición tiene su plazo; tras unos fallos seguidos la teja pasa a «sin
+// conexión» y se reintenta más despacio hasta que la cámara vuelva.
+const SNAP_TIMEOUT_MS = 8000;
+const SNAP_FAILS_OFFLINE = 3;
+const SNAP_RETRY_OFFLINE_MS = 5000;
+
+// Teja visible en pantalla (con un margen): fuera de ella no se piden fotogramas.
+// Un solo IntersectionObserver para todas las tejas; al entrar en pantalla se
+// pide un fotograma de inmediato para no verla vieja.
+const tileByEl = new WeakMap();
+const tileObserver = typeof IntersectionObserver === "function"
+  ? new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        const c = tileByEl.get(e.target);
+        if (!c) return;
+        const was = c.visible;
+        c.visible = e.isIntersecting;
+        if (c.visible && !was && wallRunning && !c.live) bumpSnap(c);
+      });
+    }, { rootMargin: "150px" })
+  : null;
+
+function observeTileVisibility(ctrl) {
+  ctrl.visible = true;           // hasta que el observador diga lo contrario
+  if (!tileObserver) return;
+  tileByEl.set(ctrl.el, ctrl);
+  tileObserver.observe(ctrl.el);
+}
+
 function bumpSnap(ctrl) {
   if (ctrl.videoReady) return;   // el vídeo ya tomó el relevo; no refrescar
+  if (wallOffscreen()) return;   // muro tapado (otra pestaña / DVR): sin peticiones
+  if (ctrl.visible === false && !_zoomActive(ctrl.el)) return;   // fuera de pantalla (scroll)
   const img = ctrl.snap;
   if (!img || !img.isConnected) return;  // teja no colocada (kiosco): no cuenta
+  const t0 = performance.now();
+  // Teja ya «sin conexión»: reintento espaciado, sin contar para el gobernador.
+  if ((ctrl.snapFails || 0) >= SNAP_FAILS_OFFLINE && !ctrl.snapLoading &&
+      t0 - (ctrl.snapLastTry || 0) < SNAP_RETRY_OFFLINE_MS) return;
   qAtt++;
   if (ctrl.snapLoading) { qSkip++; return; }  // petición en vuelo: iba atrasado (señal de presión)
   ctrl.snapLoading = true;
-  const t0 = performance.now();
+  ctrl.snapLastTry = t0;
   const next = new Image();
-  next.onload = () => {
-    img.src = next.src; ctrl.snapLoading = false;
-    qLatSum += performance.now() - t0; qLatN++;
-    ctrl.snapFails = 0; setSnapOffline(ctrl, false);
-  };
-  next.onerror = () => {
+  let settled = false;
+  const settle = (ok) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
     ctrl.snapLoading = false;
-    ctrl.snapFails = (ctrl.snapFails || 0) + 1;
-    // El servidor da 503 cuando la cámara lleva >30s sin fotograma nuevo
-    // (ver STALE_HIDE en wallcache). Tras unos fallos → "sin conexión".
-    if (ctrl.snapFails >= 3) setSnapOffline(ctrl, true);
+    if (ok) {
+      img.src = next.src;
+      qLatSum += performance.now() - t0; qLatN++;
+      ctrl.snapFails = 0; setSnapOffline(ctrl, false);
+    } else {
+      ctrl.snapFails = (ctrl.snapFails || 0) + 1;
+      // El servidor da 503 cuando la cámara lleva >30s sin fotograma nuevo
+      // (ver STALE_HIDE en wallcache). Tras unos fallos → "sin conexión".
+      if (ctrl.snapFails >= SNAP_FAILS_OFFLINE) setSnapOffline(ctrl, true);
+    }
   };
+  // Sin respuesta a tiempo: se cancela la carga y cuenta como fallo.
+  const timer = setTimeout(() => { next.onload = next.onerror = null; next.src = ""; settle(false); },
+                           SNAP_TIMEOUT_MS);
+  next.onload = () => settle(true);
+  next.onerror = () => settle(false);
   const ww = qEffWidth();
   const w = ww ? `&w=${ww}` : "";
   next.src = `${ctrl.frameUrl}?t=${Date.now()}${w}`;
@@ -2219,11 +2335,11 @@ function stopSnapRefresh() {
 // Al volver a la pestaña (el navegador frena los temporizadores en segundo
 // plano), reanudar el refresco del mosaico automáticamente — sin F5 ni Reanudar.
 document.addEventListener("visibilitychange", () => {
-  const enMosaico = $("#view-mosaico")?.classList.contains("active");
-  if (document.visibilityState === "visible" && enMosaico && state.tiles.size) {
-    if (liveMosaic) startLiveMosaic();
-    else startSnapRefresh();
-  }
+  if (document.visibilityState !== "visible") return;
+  // Solo si el muro debe estar corriendo: con el DVR abierto o en otra pestaña
+  // NO se revive (antes arrancaba debajo del DVR).
+  if (wallRunning && !wallOffscreen() && !wallUserPaused) startWallFeeds();
+  else syncWall();
 });
 
 // ---------------- zoom digital (solo en la vista ampliada/pantalla completa) ----------------
@@ -2883,6 +2999,22 @@ let zoneCtrl = null;
 let zoneBg = null;          // snapshot congelado del frame
 let zonePoints = [];        // puntos en píxeles del canvas
 let zoneDrawing = false;
+let zoneRestoreSnap = false; // la teja NO estaba en vivo antes de abrir el editor
+
+// Cierra el editor, vuelve al modal de IA y devuelve la teja a fotograma si el
+// editor la había subido a vídeo (si no, quedaba una conexión WHEP abierta).
+function closeZoneEditor() {
+  $("#zoneEditor").hidden = true;
+  $("#aiModal").hidden = false;
+  releaseZoneVideo();
+  zoneBg = null;                 // libera el fotograma congelado
+}
+
+function releaseZoneVideo() {
+  const c = zoneCtrl;
+  if (zoneRestoreSnap && c && state.tiles.get(c.streamId) === c) goSnap(c);
+  zoneRestoreSnap = false;
+}
 
 function waitFrame(video, ms) {
   return new Promise((resolve) => {
@@ -2903,11 +3035,13 @@ async function openZoneEditor(ctrl) {
   $("#zoneCamName").textContent = ctrl.title;
 
   if (!(video.videoWidth > 0)) {
+    zoneRestoreSnap = !ctrl.live;
     goLive(ctrl);   // el editor dibuja sobre un fotograma real del vídeo
     const ok = await waitFrame(video, 6000);
     if (!ok) {
       toast("Conecta la cámara (botón Ver) para poder dibujar la zona", true);
       $("#aiModal").hidden = false;
+      releaseZoneVideo();
       return;
     }
   }
@@ -2922,6 +3056,9 @@ async function openZoneEditor(ctrl) {
   zoneBg.width = canvas.width;
   zoneBg.height = canvas.height;
   zoneBg.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  // Ya hay fotograma congelado: no hace falta mantener el vídeo en vivo
+  // detrás del editor (se baja ahora, no al guardar).
+  releaseZoneVideo();
 
   zonePoints = (ctrl.config.zone || []).map(([x, y]) => [x * canvas.width, y * canvas.height]);
   drawZone();
@@ -2991,23 +3128,28 @@ function initZoneEditor() {
     $("#zoneInfo").textContent = "Sin zona: se detecta en toda la imagen.";
   });
 
-  $("#zoneCancel").addEventListener("click", () => {
-    $("#zoneEditor").hidden = true;
-    $("#aiModal").hidden = false;
-  });
+  $("#zoneCancel").addEventListener("click", closeZoneEditor);
 
-  $("#zoneSave").addEventListener("click", () => {
+  $("#zoneSave").addEventListener("click", async () => {
     const canvas = $("#zoneCanvas");
+    const previa = zoneCtrl.config.zone;
     if (zonePoints.length >= 3) {
       zoneCtrl.config.zone = zonePoints.map(([x, y]) => [x / canvas.width, y / canvas.height]);
     } else {
       zoneCtrl.config.zone = null;
     }
-    saveAiConfig(zoneCtrl.streamId, zoneCtrl.config);
+    try {
+      await saveAiConfig(zoneCtrl.streamId, zoneCtrl.config);
+    } catch (err) {
+      // El servidor no la guardó: se conserva la zona anterior y el editor sigue
+      // abierto para reintentar.
+      zoneCtrl.config.zone = previa;
+      toast("No se guardó la zona: " + err.message, true);
+      return;
+    }
     refreshZoneTag(zoneCtrl);
     updateZoneState(zoneCtrl);
-    $("#zoneEditor").hidden = true;
-    $("#aiModal").hidden = false;
+    closeZoneEditor();
     toast(zoneCtrl.config.zone ? "Zona guardada" : "Zona borrada (toda la imagen)");
   });
 }
@@ -3739,6 +3881,8 @@ function enterZoneKioskChrome() {
 }
 
 (async function init() {
+  const vacio = $("#emptyWall");
+  if (vacio) vacio.hidden = true;     // no parpadear «sin streams» antes de cargar
   if (!(await checkAuth())) return;   // muestra login/setup y se detiene
   $("#authOverlay").hidden = true;
   if (ZONE_ONLY) enterZoneKioskChrome();
@@ -3747,7 +3891,8 @@ function enterZoneKioskChrome() {
   setInterval(pollHealth, 8000);
   await loadSettings();
   if (!ZONE_ONLY && isAdmin()) { await loadDevices(); loadUsers(); }
-  if (!ZONE_ONLY) loadAlertPanel();
+  // Primero se decide si arranca el DVR (autoStart marca body.dvr-open antes de
+  // volver); luego se carga el muro, que solo corre si no hay DVR encima.
+  if (!ZONE_ONLY) await window.CamWayDVR?.autoStart?.();
   loadWall();                          // el mosaico (el servidor filtra por permiso)
-  if (!ZONE_ONLY) window.CamWayDVR?.autoStart?.();   // arrancar en vista DVR si hay cámaras
 })();
