@@ -88,32 +88,32 @@
 
 <!-- ------------------------------------------------ MOSAICO -->
 <main id="view-mosaico" class="view active">
-  <section class="wallbar">
+  <section class="cw-wallbar" aria-label="Controles del mosaico">
     <span class="sitebadge wallsite" id="wallSite" hidden></span>
-    <div class="field narrow">
-      <label for="cols">Columnas</label>
-      <select id="cols">
-        <option value="auto">Automático</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
-        <option value="4">4</option>
-        <option value="5">5</option>
-        <option value="6">6</option>
-      </select>
+    <div class="cw-zonebar" id="zoneBar" role="group" aria-label="Zonas" hidden></div>
+    <div class="cw-wallbar__tools">
+      <div class="cw-seg" id="gridSeg" role="group" aria-label="Rejilla">
+        <button type="button" data-cols="auto" aria-pressed="true" title="Columnas según el número de cámaras">Auto</button>
+        <button type="button" data-cols="1" aria-pressed="false" title="Solo la cámara seleccionada">1</button>
+        <button type="button" data-cols="2" aria-pressed="false">2×2</button>
+        <button type="button" data-cols="3" aria-pressed="false">3×3</button>
+      </div>
+      <button id="btnWallToggle" class="cw-btn" type="button" aria-pressed="true" title="Pausar o reanudar el mosaico"><span class="cw-dot cw-dot--live"></span><span>En vivo</span></button>
+      <button id="btnDvr" class="cw-btn" type="button" title="Vista en cuadrícula tipo DVR"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>Vista DVR</span></button>
+      <button id="btnFit" class="cw-ib" type="button" aria-label="Pantalla completa" aria-pressed="false" title="Pantalla completa: ajusta todas las cámaras al monitor"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <div class="cw-menuwrap">
+        <button id="btnWallMore" class="cw-ib" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="wallMenu" aria-label="Más opciones: modo de mosaico, calidad, auto-vivo, recargar, nueva zona" title="Más opciones"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg></button>
+        <div id="wallMenu" class="cw-menu" role="menu" aria-label="Más opciones del mosaico" hidden>
+          <button id="btnMosaicMode" class="cw-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" title="Mosaico en vídeo en vivo (fluido, pocas cámaras) o en fotogramas (ligero, muchas cámaras)"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></svg><span class="cw-menu__lbl">Vídeo en vivo</span><span class="cw-menu__val"></span></button>
+          <button id="btnLight" class="cw-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" title="Para equipos lentos: menos fps y fotogramas más pequeños (solo este navegador)"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span class="cw-menu__lbl">Modo ligero</span><span class="cw-menu__val"></span></button>
+          <button id="btnAutoLive" class="cw-menu__item" type="button" role="menuitemcheckbox" aria-checked="false" title="Sube a vídeo en vivo las cámaras con detección reciente, solo si hay recursos (este navegador)"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span class="cw-menu__lbl">Auto-vivo</span><span class="cw-menu__val"></span></button>
+          <button id="btnWallReload" class="cw-menu__item" type="button" role="menuitem"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg><span class="cw-menu__lbl">Recargar</span></button>
+          <button id="btnNewZone" class="cw-menu__item" type="button" role="menuitem"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg><span class="cw-menu__lbl">Nueva zona</span></button>
+        </div>
+      </div>
     </div>
-    <div class="field actions">
-      <button id="btnFit" class="ghost"><span aria-hidden="true">⛶</span> Ajustar a pantalla</button>
-      <button id="btnNewZone" class="ghost"><span aria-hidden="true">＋</span> Nueva zona</button>
-      <button id="btnWallReload" class="ghost">Recargar</button>
-      <button id="btnWallStart" class="primary">Reanudar</button>
-      <button id="btnWallStop" class="ghost">Pausar</button>
-      <button id="btnDvr" class="ghost" title="Vista en cuadrícula tipo DVR (2×2)"><span aria-hidden="true">▦</span> DVR</button>
-      <button id="btnMosaicMode" class="ghost" title="Mosaico en fotogramas (ligero, muchas cámaras) o en vídeo en vivo (fluido, pocas cámaras)"><span aria-hidden="true">🎞️</span> Mosaico</button>
-      <button id="btnLight" class="ghost" title="Para equipos lentos: menos fps y fotogramas más pequeños (solo este navegador)"><span aria-hidden="true">🐢</span> Modo ligero</button>
-      <button id="btnAutoLive" class="ghost" title="Sube a vídeo en vivo las cámaras con detección reciente, solo si hay recursos (este navegador)"><span aria-hidden="true">🎥</span> Auto-vivo</button>
-    </div>
-    <p class="hint" id="wallHint">Arrastra las cámaras para reordenarlas o moverlas entre zonas.</p>
   </section>
+  <p class="cw-hint" id="wallHint">Arrastra las cámaras para reordenarlas o moverlas entre zonas.</p>
   <section id="wall" class="wall"></section>
   <p class="empty" id="emptyWall">
     No hay streams publicados. Ve al inventario y pulsa <strong>Publicar</strong> en las cámaras que quieras ver.

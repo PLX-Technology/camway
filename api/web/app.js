@@ -667,13 +667,29 @@ function whepStateText(state, n) {
 // (window.CamWayWall.sync) y los botones, así no hay carreras entre ellos.
 let wallGen = 0;              // generación de loadWall: descarta respuestas viejas
 let wallRunning = false;      // hay refresco / vídeo corriendo ahora
-let wallUserPaused = false;   // «Pausar» pulsado a mano
+let wallUserPaused = false;   // «Pausado» activado a mano (botón En vivo / Pausado)
 let wallSig = null;           // firma de las tejas del último loadWall
 
 // ¿El muro está tapado (otra pestaña o DVR abierto)? Nada debe pedir imagen.
 function wallOffscreen() {
   return document.body.classList.contains("dvr-open") ||
     !$("#view-mosaico")?.classList.contains("active");
+}
+
+// Botón único «En vivo / Pausado» (aria-pressed = el muro está en vivo).
+function paintWallToggle() {
+  const b = $("#btnWallToggle");
+  if (!b) return;
+  b.setAttribute("aria-pressed", String(!wallUserPaused));
+  b.classList.toggle("is-paused", wallUserPaused);
+  b.innerHTML = wallUserPaused
+    ? `${icon("pause", 14)}<span>Pausado</span>`
+    : '<span class="cw-dot cw-dot--live"></span><span>En vivo</span>';
+}
+
+function setWallPaused(p) {
+  wallUserPaused = p;
+  paintWallToggle();
 }
 
 function startWallFeeds() {
@@ -716,7 +732,7 @@ function syncWall() {
 // Al volver a la pestaña Mosaico: si las cámaras no cambiaron, solo se reanuda
 // (las tejas siguen montadas); si cambiaron o nunca cargó bien, se reconstruye.
 async function enterWallView() {
-  wallUserPaused = false;
+  setWallPaused(false);
   if (wallSig === null) return loadWall();
   try {
     const d = await api("/api/wall");
@@ -763,7 +779,7 @@ async function loadWall() {
     return;
   }
   if (gen !== wallGen) return;      // otra carga más reciente tomó el relevo
-  wallUserPaused = false;           // recargar reanuda, como siempre
+  setWallPaused(false);             // recargar reanuda, como siempre
 
   // Traer la disposición del usuario desde el servidor la primera vez (persiste
   // entre equipos). Luego saveLayout mantiene la caché al día.
@@ -1352,12 +1368,55 @@ function deleteZone(id) {
   rebuildLayoutFromDom();
 }
 
-function applyColumns() {
-  const v = $("#cols").value;
-  const tpl = v === "auto"
-    ? "repeat(auto-fill, minmax(300px, 1fr))" : `repeat(${v}, 1fr)`;
-  $$(".zonegrid").forEach((g) => { g.style.gridTemplateColumns = tpl; });
+// ---- rejilla del mosaico: Auto · 1 · 2×2 · 3×3 ----
+// «Auto» = columnas según las cámaras de cada zona (1→1, ≤4→2, ≤9→3, si no 4);
+// «1» = solo la cámara seleccionada. Se recuerda en este navegador.
+let wallCols = "auto";
+try {
+  const c = localStorage.getItem("camway.cols");
+  if (["auto", "1", "2", "3"].includes(c)) wallCols = c;
+} catch (_) {}
+let selectedStream = null;        // teja seleccionada (borde azul); la que muestra el modo «1»
+
+function autoCols(n) { return n <= 1 ? 1 : n <= 4 ? 2 : n <= 9 ? 3 : 4; }
+
+function paintGridSeg() {
+  $$("#gridSeg [data-cols]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.cols === wallCols));
+  });
 }
+
+function applyColumns() {
+  const solo = wallCols === "1";
+  if (solo && !(selectedStream && state.tiles.has(selectedStream))) {
+    selectedStream = $("#wall .tile")?.dataset.streamId || null;   // por defecto, la primera
+  }
+  state.tiles.forEach((c, sid) => {
+    c.el.hidden = solo && sid !== selectedStream;
+    c.el.classList.toggle("selected", sid === selectedStream);
+  });
+  $$("#wall .zonegrid").forEach((g) => {
+    const n = [...g.children].filter((t) => t.classList.contains("tile") && !t.hidden).length;
+    g.style.setProperty("--cw-cols", solo ? 1 : wallCols === "auto" ? autoCols(n) : Number(wallCols));
+    const box = g.closest(".zonebox");
+    if (box) box.hidden = solo && n === 0;
+  });
+  paintGridSeg();
+}
+
+function selectTile(streamId) {
+  selectedStream = streamId;
+  state.tiles.forEach((c, sid) => c.el.classList.toggle("selected", sid === streamId));
+  if (wallCols === "1") applyColumns();
+}
+
+$$("#gridSeg [data-cols]").forEach((b) => {
+  b.addEventListener("click", () => {
+    wallCols = b.dataset.cols;
+    try { localStorage.setItem("camway.cols", wallCols); } catch (_) {}
+    applyColumns();
+  });
+});
 
 // ---------------- modo "ajustar a pantalla" (video wall) ----------------
 
@@ -1388,6 +1447,7 @@ function fitRender(tileEls) {
   wall.classList.add("fit");
   wall.innerHTML = "";
   const els = [...tileEls.values()];
+  els.forEach((el) => { el.hidden = false; });   // «ajustar» muestra todas (aunque el modo «1» oculte)
   const n = els.length || 1;
 
   const rect = wall.getBoundingClientRect();
@@ -1447,8 +1507,12 @@ function exitFit() {
 
 function setFitMode(on) {
   state.fitMode = on;
-  $("#btnFit").classList.toggle("primary", on);
-  $("#btnFit").textContent = on ? "⛶ Salir de pantalla" : "⛶ Ajustar a pantalla";
+  const fb = $("#btnFit");
+  fb.setAttribute("aria-pressed", String(on));
+  fb.setAttribute("aria-label", on ? "Salir de pantalla completa" : "Pantalla completa");
+  fb.title = on ? "Salir de pantalla completa" : "Pantalla completa: ajusta todas las cámaras al monitor";
+  fb.innerHTML = icon(on ? "minimize" : "maximize", 16);
+  $("#view-mosaico").classList.toggle("is-fit", on);
   if (on) {
     fitRender(currentTileEls());
   } else {
@@ -1525,14 +1589,19 @@ function stopWall() {
 
 $("#btnNewZone").addEventListener("click", addZone);
 $("#btnWallReload").addEventListener("click", () => loadWall());
+// Elemento del menú «Más»: casilla (aria-checked) con un valor opcional a la derecha.
+function paintMenuToggle(b, checked, val) {
+  b.setAttribute("aria-checked", String(!!checked));
+  const v = b.querySelector(".cw-menu__val");
+  if (v) v.textContent = val || "";
+}
+
 function applyLightBtn() {
   const b = $("#btnLight");
   if (!b) return;
-  b.classList.toggle("primary", lightMode);
   b.title = "Forzar calidad mínima en este equipo (desactiva el ajuste automático)";
-  if (lightMode) b.textContent = "🐢 Ligero ✓";
-  else if (autoQ) b.textContent = `📶 Auto: ${Q_LEVELS[qLevel].name}`;
-  else b.textContent = "🐢 Modo ligero";
+  paintMenuToggle(b, lightMode,
+    lightMode ? "mínima" : autoQ ? `auto: ${Q_LEVELS[qLevel].name}` : "");
 }
 $("#btnLight").addEventListener("click", () => {
   lightMode = !lightMode;
@@ -1548,8 +1617,7 @@ applyLightBtn();
 function applyAutoLiveBtn() {
   const b = $("#btnAutoLive");
   if (!b) return;
-  b.classList.toggle("primary", autoLive);
-  b.textContent = autoLive ? "🎥 Auto-vivo ✓" : "🎥 Auto-vivo";
+  paintMenuToggle(b, autoLive, "");
 }
 $("#btnAutoLive")?.addEventListener("click", () => {
   autoLive = !autoLive;
@@ -1566,10 +1634,9 @@ applyAutoLiveBtn();
 function applyMosaicModeBtn() {
   const b = $("#btnMosaicMode");
   if (!b) return;
-  b.classList.toggle("primary", liveMosaic);
-  b.textContent = liveMosaic ? "🎬 Vídeo en vivo ✓" : "🎞️ Fotogramas";
+  paintMenuToggle(b, liveMosaic, liveMosaic ? "" : "fotogramas");
   const al = $("#btnAutoLive");
-  if (al) al.style.display = liveMosaic ? "none" : "";
+  if (al) al.hidden = liveMosaic;     // en vivo ya están todas: auto-vivo no aplica
 }
 $("#btnMosaicMode")?.addEventListener("click", () => {
   mosaicChoice = liveMosaic ? "frames" : "live";   // alterna la elección
@@ -1625,18 +1692,58 @@ document.addEventListener("click", (e) => {
   });
 });
 
-$("#btnWallStart").addEventListener("click", () => {
-  wallUserPaused = false;
-  if (wallRunning) startWallFeeds();   // ya corría: reinicia el ritmo
+// Un solo botón: En vivo (corriendo) ⇄ Pausado. Pausar corta fotogramas y WebRTC
+// aunque estemos en mosaico en vivo; reanudar los reinicia.
+$("#btnWallToggle").addEventListener("click", () => {
+  setWallPaused(!wallUserPaused);
+  if (!wallUserPaused && wallRunning) startWallFeeds();   // ya corría: reinicia el ritmo
   else syncWall();
 });
-$("#btnWallStop").addEventListener("click", () => {
-  // Pausa de verdad: corta fotogramas y WebRTC aunque estemos en mosaico en vivo.
-  wallUserPaused = true;
-  syncWall();
-});
 
-$("#cols").addEventListener("change", applyColumns);
+// ---- menús emergentes (barra «Más» y menú «Más» de cada teja) ----
+// Un menú es un botón (aria-haspopup) + un <div role="menu"> con elementos
+// role="menuitem*". Se cierra con Escape, al elegir, al pulsar fuera o al abrir otro.
+function closeMenus(except) {
+  $$(".cw-menu:not([hidden])").forEach((m) => {
+    if (m === except) return;
+    m.hidden = true;
+    const btn = m.previousElementSibling;
+    if (btn && btn.hasAttribute("aria-expanded")) btn.setAttribute("aria-expanded", "false");
+    m.closest(".tile")?.classList.remove("menu-open");
+  });
+}
+
+function wireMenu(btn, menu) {
+  const items = () => [...menu.querySelectorAll('[role^="menuitem"]:not([hidden])')];
+  const close = (focusBtn) => {
+    closeMenus();
+    if (focusBtn) btn.focus();
+  };
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!menu.hidden) return close(true);
+    closeMenus(menu);
+    menu.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    btn.closest(".tile")?.classList.add("menu-open");
+    items()[0]?.focus();
+  });
+  menu.addEventListener("click", () => closeMenus());   // elegir un elemento cierra
+  menu.addEventListener("keydown", (e) => {
+    const it = items(), i = it.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(true); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); it[(i + 1) % it.length]?.focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); it[(i - 1 + it.length) % it.length]?.focus(); }
+    else if (e.key === "Home") { e.preventDefault(); it[0]?.focus(); }
+    else if (e.key === "End") { e.preventDefault(); it[it.length - 1]?.focus(); }
+    else if (e.key === "Tab") closeMenus();
+  });
+}
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".cw-menu, [aria-haspopup='menu']")) closeMenus();
+});
+wireMenu($("#btnWallMore"), $("#wallMenu"));
+
 
 // --------------------------------------------------------------- IA por cámara
 
@@ -3967,7 +4074,8 @@ function enterZoneKioskChrome() {
   // Ventana dedicada de una zona: sin barras ni controles, solo el mosaico.
   document.body.classList.add("zoneonly");
   const tb = $(".topbar"); if (tb) tb.style.display = "none";
-  const wb = $(".wallbar"); if (wb) wb.style.display = "none";
+  const wb = $(".cw-wallbar"); if (wb) wb.style.display = "none";
+  const wh = $("#wallHint"); if (wh) wh.style.display = "none";
   $$(".view").forEach((v) => v.classList.remove("active"));
   const m = $("#view-mosaico"); if (m) m.classList.add("active");
 }
