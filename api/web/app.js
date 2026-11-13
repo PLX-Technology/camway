@@ -1169,6 +1169,7 @@ function makeTile(tile) {
   }
 
   setupZoom(ctrl);
+  observeTileVisibility(ctrl);
   state.tiles.set(tile.stream_id, ctrl);
   if (ctrl.config.enabled) aiEngine.register(ctrl);
   return { el, ctrl };
@@ -1541,6 +1542,7 @@ function toggleFullscreen(el) {
 
 function stopWall() {
   wallRunning = false;
+  if (tileObserver) tileObserver.disconnect();   // las tejas se van a rehacer
   stopSnapRefresh();
   if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
   if (qTimer) { clearInterval(qTimer); qTimer = null; }
@@ -2138,9 +2140,33 @@ const SNAP_TIMEOUT_MS = 8000;
 const SNAP_FAILS_OFFLINE = 3;
 const SNAP_RETRY_OFFLINE_MS = 5000;
 
+// Teja visible en pantalla (con un margen): fuera de ella no se piden fotogramas.
+// Un solo IntersectionObserver para todas las tejas; al entrar en pantalla se
+// pide un fotograma de inmediato para no verla vieja.
+const tileByEl = new WeakMap();
+const tileObserver = typeof IntersectionObserver === "function"
+  ? new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        const c = tileByEl.get(e.target);
+        if (!c) return;
+        const was = c.visible;
+        c.visible = e.isIntersecting;
+        if (c.visible && !was && wallRunning && !c.live) bumpSnap(c);
+      });
+    }, { rootMargin: "150px" })
+  : null;
+
+function observeTileVisibility(ctrl) {
+  ctrl.visible = true;           // hasta que el observador diga lo contrario
+  if (!tileObserver) return;
+  tileByEl.set(ctrl.el, ctrl);
+  tileObserver.observe(ctrl.el);
+}
+
 function bumpSnap(ctrl) {
   if (ctrl.videoReady) return;   // el vídeo ya tomó el relevo; no refrescar
   if (wallOffscreen()) return;   // muro tapado (otra pestaña / DVR): sin peticiones
+  if (ctrl.visible === false && !_zoomActive(ctrl.el)) return;   // fuera de pantalla (scroll)
   const img = ctrl.snap;
   if (!img || !img.isConnected) return;  // teja no colocada (kiosco): no cuenta
   const t0 = performance.now();
