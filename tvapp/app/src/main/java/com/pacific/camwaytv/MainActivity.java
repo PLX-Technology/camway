@@ -91,12 +91,24 @@ public class MainActivity extends Activity {
 
     // Reconexión automática si una cámara se cae.
     private static final long RECONNECT_MS = 4000;
+    // Decodificadores de hardware: los TV baratos tienen 2 (el Daewoo/Amlogic T6D da
+    // NO_MEMORY al 3.º). Solo las primeras HW_TILES tejas los piden; el resto va por
+    // software (avcodec, 1 hilo) en vez de pelearse por el HW y reconectar.
+    private static final int HW_TILES = 2;
+    private static final long TILE_START_STAGGER_MS = 250;   // no arrancar 9 RTSP a la vez
+    private static final long FIRST_FRAME_GRACE_MS = 20000;  // el servidor puede tardar en armar __tv
+    private static final long LOAD_RETRY_MS = 10000;          // reintento si el servidor no responde
+    private TextView statusMsg;                               // «sin conexión con el servidor…»
+    private android.net.ConnectivityManager.NetworkCallback netCallback;
+    private int maxFails = 0;                                 // backoff del maximizado
+    private final java.util.Random rnd = new java.util.Random();
+    private final Runnable retryLoad = () -> { if (!loaded) loadWall(); };
     private final Handler vlcHandler = new Handler(Looper.getMainLooper());
 
     // Vista a pantalla completa para la cámara maximizada (en alta) o una grabación.
     private LinearLayout centerLogo;     // símbolo + "CamWay" al centro (solo con 4 cámaras)
     private VLCVideoLayout maxVlc;       // SOLO para reproducir grabaciones (libVLC)
-    private TextureView maxView;         // vivo maximizado (ExoPlayer)
+    private SurfaceView maxView;         // vivo maximizado (ExoPlayer): SurfaceView = plano de overlay, menos GPU
     private ExoPlayer maxExo;            // reproductor del vivo maximizado
     private MediaPlayer recPlayer;       // grabaciones (libVLC)
 
@@ -107,6 +119,9 @@ public class MainActivity extends Activity {
         MediaPlayer vlc;       // reproductor libVLC del tile (decodificador avcodec eficiente)
         int failCount;         // backoff de scheduleReconnect
         volatile long lastOkAt;   // último evento TimeChanged (el video avanza) → vivo
+        int index;             // posición en el muro (decide si usa decodificador HW)
+        boolean gotFrame;      // ya llegó el primer fotograma desde el último play()
+        Runnable retry;        // reintento pendiente (uno solo por teja)
         // El vivo H.264 maximizado usa ExoPlayer (maxExo).
     }
 
@@ -127,6 +142,18 @@ public class MainActivity extends Activity {
         installCrashWatchdog();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         CookieHandler.setDefault(new CookieManager());   // mantiene la sesión
+        // Al volver la red, reintentar ya en vez de esperar el backoff (hasta 60 s).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                android.net.ConnectivityManager cm = getSystemService(android.net.ConnectivityManager.class);
+                netCallback = new android.net.ConnectivityManager.NetworkCallback() {
+                    @Override public void onAvailable(android.net.Network n) {
+                        runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) onNetworkBack(); });
+                    }
+                };
+                cm.registerDefaultNetworkCallback(netCallback);
+            } catch (Exception ignore) { netCallback = null; }
+        }
 
         ArrayList<String> opts = new ArrayList<>();
         opts.add("--no-audio");
@@ -402,19 +429,24 @@ public class MainActivity extends Activity {
             try {
                 final List<Tile> got = fetchTilesBlocking();
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
                     if (got.isEmpty()) {
                         hideSplash(0);
-                        Toast.makeText(this, "Sin cámaras para este usuario. Mantén Atrás para configurar.",
-                                Toast.LENGTH_LONG).show();
-                    } else { buildGrid(got); hideSplash(900); }
+                        showStatus("Este usuario no tiene cámaras asignadas.\nMantén Atrás para configurar.");
+                        poll.removeCallbacks(retryLoad);
+                        poll.postDelayed(retryLoad, LOAD_RETRY_MS);
+                    } else { hideStatus(); buildGrid(got); hideSplash(900); }
                 });
             } catch (Exception e) {
                 final String m = e.getMessage();
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
                     hideSplash(0);
-                    Toast.makeText(this,
-                        "No se pudo cargar (" + m + "). Mantén Atrás para configurar.",
-                        Toast.LENGTH_LONG).show();
+                    SharedPreferences sp = getSharedPreferences("camway", MODE_PRIVATE);
+                    showStatus("Sin conexión con el servidor " + sp.getString("ip", "") + ":" + sp.getString("port", "")
+                            + "\nReintentando…  (" + m + ")\nMantén Atrás para configurar.");
+                    poll.removeCallbacks(retryLoad);
+                    poll.postDelayed(retryLoad, LOAD_RETRY_MS);
                 });
             }
         }).start();
@@ -437,7 +469,10 @@ public class MainActivity extends Activity {
             try {
                 final List<Tile> got = fetchTilesBlocking();
                 if (!sigOf(got).equals(currentSig) && !got.isEmpty()) {
-                    runOnUiThread(() -> { if (maxed < 0) buildGrid(got); });
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (maxed < 0) { hideStatus(); buildGrid(got); }
+                    });
                 }
             } catch (Exception ignore) { /* red intermitente: reintenta al próximo ciclo */ }
         }).start();
@@ -511,6 +546,7 @@ public class MainActivity extends Activity {
 
             t.cell = cell;
             t.vout = view;
+            t.index = i;
         }
         loaded = true;
         maxed = -1;
@@ -523,12 +559,30 @@ public class MainActivity extends Activity {
     }
 
     private void startGrid() {
-        for (Tile t : tiles) play(t);
+        startTiles();
         startWatchdog();
     }
 
     private void restartGrid() {
-        for (Tile t : tiles) if (t.vlc == null) play(t);
+        startTiles();
+        // stopAll() (onPause) cancela TODO lo de vlcHandler, vigilante incluido: rearmarlo,
+        // si no el muro queda sin anti-congelamiento tras la primera espera del TV.
+        startWatchdog();
+    }
+
+    /** Arranca las tejas paradas de a una cada TILE_START_STAGGER_MS: 9 RTSP + 9
+     *  decodificadores a la vez saturan el TV y el servidor. */
+    private void startTiles() {
+        long d = 0;
+        for (Tile t : tiles) {
+            if (t.vlc != null) continue;
+            final Tile tt = t;
+            vlcHandler.postDelayed(() -> {
+                if (maxed >= 0 || !tiles.contains(tt) || tt.vlc != null) return;
+                play(tt);
+            }, d);
+            d += TILE_START_STAGGER_MS;
+        }
     }
 
     // ---------------- muro con libVLC (decodificación avcodec eficiente) ----------------
@@ -541,7 +595,9 @@ public class MainActivity extends Activity {
             MediaPlayer mp = new MediaPlayer(libVLC);
             mp.attachViews(t.vout, null, false, false);
             Media m = new Media(libVLC, Uri.parse(t.rtsp));
-            m.setHWDecoderEnabled(true, false);   // HW si cabe; si no, cae a software (avcodec)
+            boolean hw = t.index < HW_TILES;
+            m.setHWDecoderEnabled(hw, false);   // HW solo en las primeras; el resto, software
+            if (!hw) m.addOption(":avcodec-threads=1");   // 1 hilo por cámara: con 7+ no se pelean por los 4 núcleos
             m.addOption(":network-caching=100");
             m.addOption(":live-caching=100");
             m.addOption(":clock-jitter=0");
@@ -555,12 +611,18 @@ public class MainActivity extends Activity {
             m.release();
             mp.setEventListener(new MediaPlayer.EventListener() {
                 @Override public void onEvent(MediaPlayer.Event ev) {
-                    if (ev.type == MediaPlayer.Event.TimeChanged) { t.lastOkAt = System.currentTimeMillis(); t.failCount = 0; }
-                    else if (ev.type == MediaPlayer.Event.EncounteredError) scheduleReconnect(t);
+                    if (ev.type == MediaPlayer.Event.TimeChanged) {
+                        t.lastOkAt = System.currentTimeMillis(); t.failCount = 0; t.gotFrame = true;
+                    } else if (ev.type == MediaPlayer.Event.EncounteredError
+                            || ev.type == MediaPlayer.Event.EndReached) {
+                        // EndReached = el servidor/cámara cerró la sesión: sin esto la teja queda negra.
+                        scheduleReconnect(t);
+                    }
                 }
             });
             mp.play();
             t.vlc = mp;
+            t.gotFrame = false;
             t.lastOkAt = System.currentTimeMillis();   // periodo de gracia hasta el 1er frame
         } catch (Throwable e) {
             stopPlayer(t.vlc); t.vlc = null;
@@ -578,7 +640,8 @@ public class MainActivity extends Activity {
                 long now = System.currentTimeMillis();
                 for (Tile t : tiles) {
                     if (t.vlc == null) continue;
-                    if (now - t.lastOkAt > WD_STALL_MS) { t.lastOkAt = now; scheduleReconnect(t); }
+                    long limit = t.gotFrame ? WD_STALL_MS : FIRST_FRAME_GRACE_MS;
+                    if (now - t.lastOkAt > limit) { t.lastOkAt = now; scheduleReconnect(t); }
                 }
             }
             vlcHandler.postDelayed(this, WD_PERIOD_MS);
@@ -607,7 +670,7 @@ public class MainActivity extends Activity {
 
     private void stopAll() {
         vlcHandler.removeCallbacksAndMessages(null);   // cancela reintentos pendientes
-        for (Tile t : tiles) { stopPlayer(t.vlc); t.vlc = null; }
+        for (Tile t : tiles) { t.retry = null; stopPlayer(t.vlc); t.vlc = null; }
         if (maxExo != null) { stopExo(maxExo); maxExo = null; }
         if (recPlayer != null) { stopPlayer(recPlayer); recPlayer = null; recPlaying = false; }
     }
@@ -616,15 +679,58 @@ public class MainActivity extends Activity {
 
     /** Reintenta una cámara caída/congelada tras unos segundos, si el tile sigue vivo. */
     private void scheduleReconnect(Tile t) {
+        if (t.retry != null) return;         // ya hay un reintento en camino: no apilar
         t.failCount++;
-        long delay = Math.min(RECONNECT_MS * (1L << Math.min(t.failCount - 1, 4)), RECONNECT_MS_MAX);
-        vlcHandler.postDelayed(() -> {
+        long base = Math.min(RECONNECT_MS * (1L << Math.min(t.failCount - 1, 4)), RECONNECT_MS_MAX);
+        long delay = (long) (base * (0.8 + 0.4 * rnd.nextDouble()));   // jitter: no reconectar todas juntas
+        t.retry = () -> {
+            t.retry = null;
             if (maxed >= 0) return;            // hay una maximizada: no tocar el grid
             if (!tiles.contains(t)) return;    // el muro se reconstruyó: tile viejo
             stopPlayer(t.vlc); t.vlc = null;
             play(t);
-        }, delay);
+        };
+        vlcHandler.postDelayed(t.retry, delay);
     }
+
+    /** Volvió la red: reintentar ya (sin esperar el backoff de hasta 60 s). */
+    private void onNetworkBack() {
+        if (!loaded) { poll.removeCallbacks(retryLoad); poll.post(retryLoad); return; }
+        if (maxed >= 0) return;
+        long d = 0;
+        for (Tile t : tiles) {
+            if (t.gotFrame && t.retry == null) continue;
+            if (t.retry != null) { vlcHandler.removeCallbacks(t.retry); t.retry = null; }
+            t.failCount = 0;
+            final Tile tt = t;
+            vlcHandler.postDelayed(() -> {
+                if (maxed >= 0 || !tiles.contains(tt)) return;
+                stopPlayer(tt.vlc); tt.vlc = null; play(tt);
+            }, d);
+            d += TILE_START_STAGGER_MS;
+        }
+    }
+
+    private void showStatus(String msg) {
+        if (statusMsg == null) {
+            statusMsg = new TextView(this);
+            statusMsg.setTextColor(Color.WHITE);
+            statusMsg.setTextSize(20);
+            statusMsg.setGravity(Gravity.CENTER);
+            statusMsg.setLineSpacing(0, 1.25f);
+            statusMsg.setPadding(48, 32, 48, 32);
+            statusMsg.setBackgroundColor(0xCC0B0F14);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.gravity = Gravity.CENTER;
+            root.addView(statusMsg, lp);
+        }
+        statusMsg.setText(msg);
+        statusMsg.setVisibility(View.VISIBLE);
+        statusMsg.bringToFront();
+    }
+
+    private void hideStatus() { if (statusMsg != null) statusMsg.setVisibility(View.GONE); }
 
     private final GradientDrawable border = buildBorder();
     private GradientDrawable buildBorder() {
@@ -651,7 +757,7 @@ public class MainActivity extends Activity {
         if (centerLogo != null) centerLogo.setVisibility(View.GONE);
         maxed = i;
         if (maxView == null) {
-            maxView = new TextureView(this);
+            maxView = new SurfaceView(this);
             root.addView(maxView, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
@@ -664,11 +770,15 @@ public class MainActivity extends Activity {
                     .setPrioritizeTimeOverSizeThresholds(true).build();
             DefaultRenderersFactory rf = new DefaultRenderersFactory(this).setEnableDecoderFallback(true);
             maxExo = new ExoPlayer.Builder(this, rf).setLoadControl(lc).build();
-            maxExo.setVideoTextureView(maxView);
+            maxExo.setVideoSurfaceView(maxView);
             maxExo.addListener(new Player.Listener() {
                 @Override public void onPlayerError(PlaybackException error) {
-                    if (maxed == which) vlcHandler.postDelayed(() -> { if (maxed == which) maximize(which); }, RECONNECT_MS);
+                    // Reintento con espera creciente (4 s → 30 s), no cada 4 s para siempre.
+                    long d = Math.min(RECONNECT_MS * (1L << Math.min(maxFails, 3)), 30000);
+                    maxFails++;
+                    if (maxed == which) vlcHandler.postDelayed(() -> { if (maxed == which) maximize(which); }, d);
                 }
+                @Override public void onRenderedFirstFrame() { maxFails = 0; }
             });
             RtspMediaSource ms = new RtspMediaSource.Factory().setForceUseRtpTcp(true)
                     .createMediaSource(MediaItem.fromUri(Uri.parse(t.rtspHi)));
@@ -915,6 +1025,11 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        poll.removeCallbacksAndMessages(null);
+        if (netCallback != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try { getSystemService(android.net.ConnectivityManager.class).unregisterNetworkCallback(netCallback); }
+            catch (Exception ignore) {}
+        }
         stopAll();
         if (libVLC != null) { try { libVLC.release(); } catch (Exception e) {} }
         super.onDestroy();

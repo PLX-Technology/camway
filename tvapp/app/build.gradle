@@ -10,17 +10,46 @@ android {
         applicationId "com.pacific.camwaytv"
         minSdk 21
         targetSdk 34
-        versionCode 33
-        versionName "4.1"
-        ndk {
-            // ABIs que cubren prácticamente todos los Android TV reales.
-            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+        versionCode 34
+        versionName "4.2"
+    }
+
+    // Una APK por arquitectura: cada TV solo usa una copia de libVLC (~20 MB cada una).
+    // Los Android TV reales son ARM; muchos (p. ej. Amlogic T6D) corren 32 bits.
+    // x86_64 sobraba (22 MB). Para un TV de 32 bits se instala la «armeabi-v7a».
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a'
+            universalApk false
+        }
+    }
+
+    // Clave de firma propia y estable (fuera del repo): así las versiones nuevas se
+    // instalan ENCIMA sin desinstalar ni perder la configuración. Se pasa por variables
+    // de entorno; sin ellas se firma con la clave de depuración de la máquina.
+    signingConfigs {
+        camway {
+            def ks = System.getenv("CAMWAY_TV_KEYSTORE")
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("CAMWAY_TV_KEYSTORE_PASS")
+                keyAlias System.getenv("CAMWAY_TV_KEY_ALIAS") ?: "camwaytv"
+                keyPassword System.getenv("CAMWAY_TV_KEYSTORE_PASS")
+            }
         }
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true          // R8: código más chico y optimizado
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig System.getenv("CAMWAY_TV_KEYSTORE") ? signingConfigs.camway : signingConfigs.debug
+            // TEMPORAL mientras se prueba: permite leer/restaurar la configuración por ADB
+            // (run-as). Para producción, quitarlo (ART optimiza mejor una app no depurable).
+            debuggable true
         }
     }
 
