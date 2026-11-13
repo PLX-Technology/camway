@@ -92,9 +92,14 @@ def _ff_args(route_names, cols, rows, cw, ch, empty_img=None) -> list:
         else:
             args += ["-f", "lavfi", "-i", f"color=c=0x0b0f14:s={cw}x{ch}:r=15"]
             fc.append(f"[{k}:v]setsar=1,format=yuv420p[v{k}]")
-    layout = "|".join(f"{(k % cols) * cw}_{(k // cols) * ch}" for k in range(n))
-    chain = (";".join(fc) + ";" + "".join(f"[v{k}]" for k in range(n))
-             + f"xstack=inputs={n}:layout={layout}[v]")
+    if n == 1:
+        # xstack exige 2 entradas o más: con una sola celda (rejilla 1×1) la
+        # imagen pasa tal cual.
+        chain = fc[0] + ";[v0]null[v]"
+    else:
+        layout = "|".join(f"{(k % cols) * cw}_{(k // cols) * ch}" for k in range(n))
+        chain = (";".join(fc) + ";" + "".join(f"[v{k}]" for k in range(n))
+                 + f"xstack=inputs={n}:layout={layout}[v]")
     args += ["-filter_complex", chain, "-map", "[v]",
              "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
              "-profile:v", "baseline", "-pix_fmt", "yuv420p",
