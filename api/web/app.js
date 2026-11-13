@@ -73,11 +73,38 @@ const state = {
 
 // --------------------------------------------------------------- utilidades
 
+// Escapa texto para interpolarlo en plantillas de innerHTML (contenido y
+// atributos entre comillas). TODO dato que venga de la API —nombres, banners
+// RTSP, errores, rutas, usuarios— pasa por aquí: los banners los escribe
+// cualquier equipo de la LAN. Para texto suelto, mejor textContent.
+function esc(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// Llamada JSON a la API. Corta a los API_TIMEOUT_MS (o options.timeout; 0 =
+// sin límite) para que una petición colgada no deje la interfaz esperando.
+const API_TIMEOUT_MS = 30000;
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const { timeout = API_TIMEOUT_MS, ...opts } = options;
+  const ctrl = timeout > 0 && !opts.signal ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : null;
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...(ctrl ? { signal: ctrl.signal } : {}),
+      ...opts,
+    });
+  } catch (e) {
+    if (e.name === "AbortError" && ctrl && ctrl.signal.aborted) {
+      throw new Error("El servidor no respondió a tiempo");
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (res.status === 401 && !path.endsWith("/api/me")) {
     showAuth("login");                 // sesión expirada: pedir login de nuevo
   }
@@ -208,7 +235,7 @@ $("#btnScan").addEventListener("click", async () => {
 
   try {
     const r = await api("/api/scan", {
-      method: "POST",
+      method: "POST", timeout: 0,
       body: JSON.stringify({ cidr, channels: Number($("#channels").value) || 8 }),
     });
     setScanning(true);
@@ -226,7 +253,7 @@ $("#btnOnvifScan").addEventListener("click", async () => {
   if (!cidr) return toast("Indica el segmento a escanear", true);
   try {
     const r = await api("/api/onvif-scan", {
-      method: "POST", body: JSON.stringify({ cidr }),
+      method: "POST", timeout: 0, body: JSON.stringify({ cidr }),
     });
     setScanning(true);
     $("#progStage").textContent = "ONVIF: buscando en :8080/:80";
@@ -520,7 +547,7 @@ $("#btnProbe").addEventListener("click", async () => {
   btn.textContent = "Interrogando…";
   try {
     const dev = await api("/api/probe", {
-      method: "POST",
+      method: "POST", timeout: 0,
       body: JSON.stringify({
         host, port: Number($("#onePort").value) || 554,
         username: $("#oneUser").value.trim(),
@@ -548,7 +575,7 @@ $("#btnOnvif").addEventListener("click", async () => {
   btn.disabled = true;
   btn.textContent = "Buscando…";
   try {
-    const r = await api("/api/onvif");
+    const r = await api("/api/onvif", { timeout: 0 });
     $("#onvifHint").textContent = r.devices.length
       ? r.devices.map((d) => `${d.address} ${d.name || d.hardware || ""}`).join(" · ")
       : "Nadie respondió al multicast. " + r.nota + ". Usa el barrido del segmento.";
@@ -1004,7 +1031,7 @@ function makeTile(tile) {
     ev.stopPropagation();
     optBtn.classList.add("busy");
     try {
-      const r = await api(`/api/streams/${tile.stream_id}/optimize`, { method: "POST" });
+      const r = await api(`/api/streams/${tile.stream_id}/optimize`, { method: "POST", timeout: 0 });
       const n = (r.configs || []).filter((c) => c.ok).length;
       toast(`Optimizada para tiempo real (keyframe 1s en ${n} flujo(s)). Reconecta la cámara.`);
     } catch (e) {
@@ -2441,7 +2468,7 @@ function waCloseModal() {
 
 async function waRefreshQr() {
   try {
-    const r = await api("/api/settings/whatsapp/link", { method: "POST", body: JSON.stringify({}) });
+    const r = await api("/api/settings/whatsapp/link", { method: "POST", timeout: 0, body: JSON.stringify({}) });
     if (r.state === "open") { toast("WhatsApp vinculado"); return waCloseModal(); }
     if (r.qr) {
       $("#waQr").src = r.qr; $("#waQr").hidden = false;
@@ -2481,7 +2508,7 @@ $("#waPair").addEventListener("click", async () => {
   if (!phone) return toast("Escribe el número del celular que enviará las alertas", true);
   const btn = $("#waPair"); btn.disabled = true;
   try {
-    const r = await api("/api/settings/whatsapp/link", { method: "POST", body: JSON.stringify({ phone }) });
+    const r = await api("/api/settings/whatsapp/link", { method: "POST", timeout: 0, body: JSON.stringify({ phone }) });
     if (r.pairing_code) {
       $("#waCode").textContent = r.pairing_code.replace(/(.{4})(?=.)/g, "$1-");
       $("#waCode").hidden = false;
@@ -3046,7 +3073,7 @@ $("#osdSave")?.addEventListener("click", async () => {
   $("#osdState").textContent = "Aplicando en la cámara…";
   try {
     const res = await api(`/api/devices/${osdDev.id}/osd`, {
-      method: "POST",
+      method: "POST", timeout: 0,
       body: JSON.stringify({
         name: $("#osdName").value.trim(),
         show_name: $("#osdShowName").checked,
