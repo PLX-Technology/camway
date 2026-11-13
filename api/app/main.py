@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import ipaddress
 import logging
 import os
 import re
@@ -591,9 +592,23 @@ _ADMIN_PREFIXES = ("/api/scan", "/api/onvif", "/api/probe", "/api/reprobe",
                    "/api/blueiris", "/api/users")
 
 
+# Subred interna de compose (detector, proxy Blue Iris…). La fija docker-compose.yml
+# y la autoriza mediamtx.yml; se puede cambiar con CAMWAY_INTERNAL_CIDR si en el
+# equipo esa subred ya la usa otra red Docker.
+try:
+    _INTERNAL_NET = ipaddress.ip_network(os.environ.get("CAMWAY_INTERNAL_CIDR", "172.28.0.0/24"), strict=False)
+except ValueError:
+    _INTERNAL_NET = ipaddress.ip_network("172.28.0.0/24")
+
+
 def _client_is_internal(request: Request) -> bool:
     host = request.client.host if request.client else ""
-    return host.startswith("172.28.") or host in ("127.0.0.1", "::1", "localhost")
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host) in _INTERNAL_NET
+    except ValueError:
+        return False
 
 
 # Caché de sesión en memoria: el muro pide fotogramas a 6fps×N cámaras, no se
