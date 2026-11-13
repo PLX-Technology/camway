@@ -3879,105 +3879,338 @@ $("#btnSaveSettings").addEventListener("click", async () => {
 });
 
 // --------------------------------------------------------------- grabaciones
+// Cámaras a la izquierda, un día, un reproductor y la línea de tiempo de 24 h.
+// Todo sale de lo que ya entrega la API: de Blue Iris, el inicio y la duración
+// de cada clip (y su marca de alerta); de la grabación local, los archivos con
+// su hora de modificación (= fin del tramo). Donde la API no da la duración de
+// un tramo (grabación local) se ESTIMA con la separación entre archivos y la
+// línea de tiempo lo avisa. No se inventa nada.
 
 let recDevices = [];
 let recSelected = null;
+let recDay = "today";          // "today" | "yesterday" | "custom"
+let recItems = [];             // tramos y eventos del día, ya normalizados
+let recPlaying = null;         // el que se está reproduciendo
+let recLoadSeq = 0;            // descarta respuestas de una carga anterior
+
+const pad2 = (n) => String(n).padStart(2, "0");
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const fmtHM = (sec) => { const d = new Date(sec * 1000); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const fmtHMS = (sec) => { const d = new Date(sec * 1000); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+
+// Medianoche LOCAL del día elegido.
+function recDayDate() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (recDay === "today") return today;
+  if (recDay === "yesterday") return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec($("#recDate").value);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : today;
+}
+
+function recDayLabel(d) {
+  const txt = d.toLocaleDateString("es", { day: "numeric", month: "long" });
+  if (recDay === "today") return `Hoy, ${txt}`;
+  if (recDay === "yesterday") return `Ayer, ${txt}`;
+  return d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
+}
 
 async function loadRecDevices() {
   let data;
   try { data = await api("/api/recordings/devices"); }
   catch (_) { return; }
-  if (!data.available && !data.devices.length) $("#recHint").textContent = "Blue Iris no está configurado.";
-  recDevices = data.devices;
-  if (!$("#recDate").value) $("#recDate").value = new Date().toISOString().slice(0, 10);
+  recDevices = data.devices || [];
+  const list = $("#recCamList");
   if (!recDevices.length) {
-    $("#recGrid").innerHTML = '<p class="hint">No tienes cámaras con grabaciones.</p>';
-    $("#recCamName").textContent = "—";
+    recSelected = null;
+    list.innerHTML = '<p class="gr-camempty">Ninguna cámara tiene grabaciones. Activa la grabación local con el botón de grabar de una cámara en el Mosaico.</p>';
+    $("#recCamName").textContent = "Grabaciones";
+    $("#recHint").textContent = !data.available ? "Blue Iris no está configurado." : "";
+    closeRecStage();
+    recItems = [];
+    renderRec();
     return;
   }
-  // menú con miniatura por cámara
-  $("#recCamMenu").innerHTML = recDevices.map((d, i) => `
-    <div class="ts-item" data-i="${i}">
-      <img src="${esc(d.thumb)}" alt="" onerror="this.style.visibility='hidden'">
-      <span class="n">${esc(d.name)}</span>
-    </div>`).join("");
-  $$("#recCamMenu .ts-item").forEach((el) =>
-    el.addEventListener("click", () => { recSelectDevice(recDevices[+el.dataset.i]); loadClips(); }));
-  if (!recSelected || !recDevices.some((d) => d.device_id === recSelected.device_id))
-    recSelectDevice(recDevices[0]);
+  list.innerHTML = recDevices.map((d, i) => `
+    <button type="button" class="gr-cam" data-i="${i}" aria-current="false">
+      <span class="gr-camthumb">${d.thumb
+        ? `<img src="${esc(d.thumb)}" alt="" loading="lazy" onerror="this.remove()">` : ""}<span class="gr-camph">${icon("camera", 16)}</span></span>
+      <span class="gr-camtxt">
+        <span class="gr-camname">${esc(d.name)}</span>
+        <span class="gr-camsub" data-sub>${d.source === "local" ? "Grabación local" : "Blue Iris"}</span>
+      </span>
+    </button>`).join("");
+  $$("#recCamList .gr-cam").forEach((b) =>
+    b.addEventListener("click", () => recSelectDevice(recDevices[+b.dataset.i])));
+  const keep = recSelected && recDevices.find((d) => d.device_id === recSelected.device_id);
+  recSelectDevice(keep || recDevices[0]);
 }
 
 function recSelectDevice(d) {
+  const changed = !recSelected || recSelected.device_id !== d.device_id;
   recSelected = d;
   $("#recCamName").textContent = d.name;
-  const th = $("#recCamThumb");
-  if (d.thumb) { th.src = d.thumb; th.style.visibility = ""; } else th.style.visibility = "hidden";
-  $("#recCamMenu").hidden = true;
-  $$("#recCamMenu .ts-item").forEach((el) =>
-    el.classList.toggle("sel", recDevices[+el.dataset.i]?.device_id === d.device_id));
+  $$("#recCamList .gr-cam").forEach((b) =>
+    b.setAttribute("aria-current", String(recDevices[+b.dataset.i]?.device_id === d.device_id)));
+  if (changed) closeRecStage();
+  loadClips();
 }
 
-$("#recCamTrigger").addEventListener("click", (e) => {
-  e.stopPropagation();
-  $("#recCamMenu").hidden = !$("#recCamMenu").hidden;
-});
-document.addEventListener("click", (e) => {
-  if (!e.target.closest("#recCamSel")) $("#recCamMenu").hidden = true;
-});
+// ---- día
+function setRecDay(day) {
+  recDay = day;
+  $$("#recDays button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.day === day)));
+  const di = $("#recDate");
+  di.hidden = day !== "custom";
+  if (day === "custom") {
+    if (!di.value) di.value = ymd(recDayDate());
+    di.max = ymd(new Date());
+  }
+  loadClips();
+}
+$$("#recDays button").forEach((b) => b.addEventListener("click", () => setRecDay(b.dataset.day)));
+$("#recDate").addEventListener("change", loadClips);
+
+// ---- carga y normalización
+function parseDur(txt) {          // "00:01:12 (3.2MB)" → 72
+  const m = /(\d+):(\d{2}):(\d{2})/.exec(String(txt || ""));
+  return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0;
+}
+
+// Duración típica de un archivo continuo: la mediana de la separación entre
+// archivos consecutivos (el servidor no la entrega). Sin datos: 10 min, que es
+// el valor por defecto del servidor.
+function estimateSegLen(mtimes) {
+  const gaps = [];
+  for (let i = 1; i < mtimes.length; i++) {
+    const g = mtimes[i] - mtimes[i - 1];
+    if (g >= 60 && g <= 3600) gaps.push(g);
+  }
+  if (!gaps.length) return { sec: 600, measured: false };
+  gaps.sort((a, b) => a - b);
+  return { sec: gaps[Math.floor(gaps.length / 2)], measured: true };
+}
+
+function eventLabel(name) {       // «2026-11-13_10-00-00_Persona_sin_casco.mp4» → «Persona sin casco»
+  const m = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_(.+?)\.mp4$/i.exec(name || "");
+  const raw = m ? m[1] : "";
+  return raw ? raw.replace(/_/g, " ") : "Evento";
+}
+
+async function fetchBlueIris(d, dayDate) {
+  const data = await api(`/api/recordings/${encodeURIComponent(d.device_id)}/clips?date=${ymd(dayDate)}`);
+  const dev = encodeURIComponent(d.device_id);
+  const items = (data.clips || []).map((c) => {
+    const dur = parseDur(c.size);
+    return {
+      kind: (c.flags & 2) ? "event" : "cont", label: (c.flags & 2) ? "Alerta" : "",
+      start: c.date, end: c.date + dur, dur, size: c.size || "",
+      thumb: `/api/recordings/${dev}/thumb?path=${encodeURIComponent(c.path)}`,
+      url: `/api/recordings/${dev}/video.mp4?path=${encodeURIComponent(c.path)}`,
+      name: "",
+    };
+  });
+  items.sort((a, b) => a.start - b.start);
+  return { items, hint: `${items.length} grabación(es)`, note: "" };
+}
+
+async function fetchLocal(d, t0, t1) {
+  const data = await api(`/api/recordings/${encodeURIComponent(d.device_id)}`);
+  const recs = data.recordings || [];
+  const mode = data.config && data.config.mode;
+  const modeTxt = mode === "continuous" ? "Solo continuo" : mode ? "Continuo + eventos" : "";
+  const sub = $(`#recCamList .gr-cam[data-i="${recDevices.indexOf(d)}"] [data-sub]`);
+  if (sub && modeTxt) sub.textContent = modeTxt;
+  const dev = encodeURIComponent(d.device_id);
+  const fileUrl = (r) => `/api/recordings/${dev}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${encodeURIComponent(r.kind)}`;
+  const conts = recs.filter((r) => r.kind !== "event").sort((a, b) => a.mtime - b.mtime);
+  const seg = estimateSegLen(conts.map((r) => r.mtime));
+  let prevEnd = 0;
+  const items = [];
+  for (const r of conts) {
+    const start = Math.max(r.mtime - seg.sec, prevEnd);
+    prevEnd = r.mtime;
+    if (r.mtime < t0 || r.mtime >= t1) continue;
+    items.push({ kind: "cont", label: "", start, end: r.mtime, dur: 0, size: fmtSize(r.size), thumb: "", url: fileUrl(r), name: r.name, approx: true });
+  }
+  recs.filter((r) => r.kind === "event" && r.mtime >= t0 && r.mtime < t1).forEach((r) => {
+    items.push({ kind: "event", label: eventLabel(r.name), start: r.mtime, end: r.mtime, dur: 0, size: fmtSize(r.size), thumb: "", url: fileUrl(r), name: r.name });
+  });
+  items.sort((a, b) => a.start - b.start);
+  const nCont = items.filter((i) => i.kind === "cont").length;
+  const nEv = items.length - nCont;
+  const hint = items.length
+    ? `${nCont} tramo(s) continuo(s) y ${nEv} evento(s)${modeTxt ? " · " + modeTxt : ""}`
+    : recDay === "today" ? "Grabando localmente; aún no hay archivos de hoy (o la grabación se activó hace poco)." : "";
+  const note = nCont
+    ? `La hora de fin de cada tramo es real; su duración se ${seg.measured ? "estima" : "supone"} en ~${Math.round(seg.sec / 60)} min, porque el servidor no la entrega.`
+    : "";
+  return { items, hint, note };
+}
 
 async function loadClips() {
-  const dev = recSelected && recSelected.device_id;
-  const date = $("#recDate").value;
-  const grid = $("#recGrid");
-  if (!dev) return;
+  const d = recSelected;
+  if (!d) return;
+  const seq = ++recLoadSeq;
+  const dayDate = recDayDate();
+  const t0 = dayDate.getTime() / 1000;
+  const t1 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate() + 1).getTime() / 1000;
   $("#recHint").textContent = "Cargando…";
-  grid.innerHTML = "";
-  // Local si lo dice el server, o si la cámara no es de Blue Iris (sin bi_camera).
-  if (recSelected.source === "local" || !recSelected.bi_camera)
-    return loadLocalClips(dev, grid);
-  let data;
-  try { data = await api(`/api/recordings/${dev}/clips?date=${date}`); }
-  catch (err) { $("#recHint").textContent = err.message; return; }
-  $("#recHint").textContent = `${data.clips.length} grabación(es)`;
-  if (!data.clips.length) { grid.innerHTML = '<p class="hint">Sin grabaciones ese día.</p>'; return; }
-  data.clips.forEach((c) => grid.appendChild(recCard(dev, c)));
-  // Cargar las miniaturas con concurrencia limitada: así el pool de conexiones
-  // no se satura y la reproducción de un clip no queda encolada tras ellas.
-  thumbQueue = [...grid.querySelectorAll("img[data-src]")];
+  let res;
+  try {
+    res = (d.source === "local" || !d.bi_camera) ? await fetchLocal(d, t0, t1) : await fetchBlueIris(d, dayDate);
+  } catch (err) {
+    if (seq !== recLoadSeq) return;
+    recItems = [];
+    renderRec();
+    $("#recHint").textContent = err.message;
+    return;
+  }
+  if (seq !== recLoadSeq) return;
+  recItems = res.items;
+  renderRec(res);
+}
+
+// ---- pintar
+function itemText(it) {
+  if (it.kind === "event") return `${it.label || "Evento"} · ${fmtHM(it.start)}`;
+  return it.end > it.start ? `${fmtHM(it.start)}–${fmtHM(it.end)}` : fmtHM(it.start);
+}
+
+function renderRec(res = { hint: "", note: "" }) {
+  const dayDate = recDayDate();
+  const t0 = dayDate.getTime() / 1000;
+  const t1 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate() + 1).getTime() / 1000;
+  const span = t1 - t0;
+  $("#recDayLabel").textContent = recDayLabel(dayDate);
+  $("#recHint").textContent = recSelected ? res.hint || "" : $("#recHint").textContent;
+  $("#recTlNote").textContent = res.note || "";
+
+  // línea de tiempo
+  const track = $("#recTrack");
+  track.replaceChildren();
+  const pct = (sec) => Math.max(0, Math.min(100, ((sec - t0) / span) * 100));
+  recItems.forEach((it, i) => {
+    if (it.kind === "cont" || it.dur > 0) {
+      if (it.end <= it.start) return;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "gr-seg" + (it.kind === "event" ? " gr-seg-ev" : "");
+      b.style.left = pct(it.start) + "%";
+      b.style.width = Math.max(0.35, pct(it.end) - pct(it.start)) + "%";
+      const txt = `Grabación ${itemText(it)}`;
+      b.setAttribute("aria-label", txt); b.title = txt;
+      b.dataset.k = i;
+      b.addEventListener("click", () => playItem(it));
+      track.appendChild(b);
+    }
+  });
+  recItems.forEach((it, i) => {
+    if (it.kind !== "event") return;
+    const m = document.createElement("button");
+    m.type = "button";
+    m.className = "gr-mark";
+    m.style.left = pct(it.start) + "%";
+    const txt = `Evento: ${it.label || "Evento"} a las ${fmtHM(it.start)}`;
+    m.setAttribute("aria-label", txt); m.title = txt;
+    m.dataset.k = i;
+    m.addEventListener("click", () => playItem(it));
+    track.appendChild(m);
+  });
+  if (recDay === "today") {         // «ahora», con la hora real del navegador
+    const now = Date.now() / 1000;
+    if (now >= t0 && now < t1) {
+      const n = document.createElement("span");
+      n.className = "gr-now-mark"; n.style.left = pct(now) + "%"; n.title = "Ahora";
+      n.setAttribute("aria-hidden", "true");
+      track.appendChild(n);
+    }
+  }
+
+  // listas
+  const events = recItems.map((it, i) => [it, i]).filter(([it]) => it.kind === "event");
+  const conts = recItems.map((it, i) => [it, i]).filter(([it]) => it.kind === "cont");
+  $("#recEvBox").hidden = events.length === 0;
+  $("#recEvCount").textContent = events.length === 1 ? "1 clip" : `${events.length} clips`;
+  $("#recContCount").textContent = conts.length === 0 ? "" : conts.length === 1 ? "1 tramo" : `${conts.length} tramos`;
+  fillClipGrid($("#recEvGrid"), events);
+  fillClipGrid($("#recGrid"), conts);
+  const none = recItems.length === 0;
+  const empty = $("#recEmpty");
+  empty.hidden = !none || !recSelected;
+  empty.textContent = none ? "Sin grabaciones ese día." : "";
+  $("#recContTitle").textContent = "Grabación continua";
+  if (recPlaying) markPlaying();
+  // Miniaturas con concurrencia limitada: no saturan el pool de conexiones.
+  thumbQueue = [...document.querySelectorAll("#view-grabaciones img[data-src]")];
   pumpThumbs();
 }
 
-// Grabaciones LOCALES (las que CamWay graba por su cuenta, no Blue Iris).
-async function loadLocalClips(dev, grid) {
-  let data;
-  try { data = await api(`/api/recordings/${dev}`); }
-  catch (err) { $("#recHint").textContent = err.message; return; }
-  const recs = data.recordings || [];
-  const mode = data.config && data.config.mode;
-  $("#recHint").textContent = recs.length
-    ? `${recs.length} grabación(es) locales${mode ? " · modo " + mode : ""}`
-    : "Grabando localmente; aún no hay archivos (o grabación recién activada).";
-  if (!recs.length) { grid.innerHTML = '<p class="hint">Sin grabaciones todavía.</p>'; return; }
-  recs.forEach((r) => grid.appendChild(localRecCard(dev, r)));
+function fillClipGrid(grid, entries) {
+  grid.innerHTML = entries.map(([it, i]) => `
+    <button type="button" class="gr-clip" data-k="${i}" aria-current="false">
+      <span class="gr-clipthumb">
+        ${it.thumb ? `<img data-src="${esc(it.thumb)}" alt="" decoding="async" onerror="this.style.display='none'">` : ""}
+        <span class="gr-clipph">${icon(it.kind === "event" ? "bell" : "film", 20)}</span>
+        ${it.dur > 0 ? `<span class="gr-clipdur">${esc(fmtDur(it.dur))}</span>` : ""}
+      </span>
+      <span class="gr-cliplabel">${esc(itemText(it))}</span>
+      <span class="gr-clipsub">${esc(it.size)}</span>
+    </button>`).join("");
+  grid.querySelectorAll(".gr-clip").forEach((b) =>
+    b.addEventListener("click", () => playItem(recItems[+b.dataset.k])));
 }
 
-function localRecCard(dev, r) {
-  const el = document.createElement("div");
-  el.className = "reccard";
-  const url = `/api/recordings/${dev}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${r.kind}`;
-  const tag = r.kind === "event" ? '<span class="alert" title="Clip de evento">🔔</span>' : "";
-  const label = r.kind === "event" ? "evento" : "continuo";
-  el.innerHTML = `
-    <div class="recthumb norec">
-      <span class="play">▶</span>${tag}
-      <span class="dur">${label}</span>
-    </div>
-    <div class="recmeta"><div class="t">${esc(fmtRecTime(r.mtime))}</div><div class="s">${esc(fmtSize(r.size))}</div></div>`;
-  el.addEventListener("click", () =>
-    playRecUrl(`${recSelected.name} — ${fmtRecTime(r.mtime)}`, url));
-  return el;
+function fmtDur(s) {
+  const m = Math.floor(s / 60), r = Math.round(s % 60);
+  return m >= 60 ? `${Math.floor(m / 60)}:${pad2(m % 60)}:${pad2(r)}` : `${m}:${pad2(r)}`;
 }
 
+// ---- reproductor
+function markPlaying() {
+  const k = recItems.indexOf(recPlaying);
+  document.querySelectorAll("#view-grabaciones [data-k]").forEach((el) => {
+    const on = +el.dataset.k === k;
+    if (el.classList.contains("gr-clip")) el.setAttribute("aria-current", String(on));
+    el.classList.toggle("on", on);
+  });
+}
+
+function playItem(it) {
+  if (!it) return;
+  recPlaying = it;
+  const v = $("#recStageVideo");
+  const empty = $("#recStageEmpty");
+  v.pause(); v.removeAttribute("src"); v.load();
+  $("#recStageMsg").textContent = "Preparando vídeo…";
+  empty.hidden = false;
+  v.onplaying = () => { empty.hidden = true; };
+  v.onerror = () => { $("#recStageMsg").textContent = "No se pudo reproducir esta grabación."; empty.hidden = false; };
+  v.src = it.url;
+  v.load();
+  v.play().catch(() => {});
+  const dl = $("#recDl");
+  dl.href = it.url; dl.hidden = false;
+  if (it.name) dl.setAttribute("download", it.name); else dl.setAttribute("download", "");
+  $("#recStageInfo").textContent = `${recSelected ? recSelected.name + " — " : ""}${recDayLabel(recDayDate())}, ${itemText(it)}${it.size ? " · " + it.size : ""}`;
+  markPlaying();
+  v.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function closeRecStage() {
+  const v = $("#recStageVideo");
+  v.pause(); v.removeAttribute("src"); v.load();
+  v.onplaying = null; v.onerror = null;
+  recPlaying = null;
+  $("#recStageMsg").textContent = "Elige un tramo en la línea de tiempo o en la lista para reproducirlo.";
+  $("#recStageEmpty").hidden = false;
+  $("#recStageInfo").textContent = "";
+  $("#recDl").hidden = true;
+  document.querySelectorAll("#view-grabaciones .on").forEach((el) => el.classList.remove("on"));
+}
+
+// Miniaturas de Blue Iris con concurrencia limitada (el pool de conexiones no
+// se satura y la reproducción de un clip no queda encolada tras ellas).
 let thumbQueue = [];
 let thumbActive = 0;
 const THUMB_CONCURRENCY = 4;
@@ -3992,50 +4225,12 @@ function pumpThumbs() {
 }
 function onThumbDone() { thumbActive--; pumpThumbs(); }
 
-function fmtClipTime(ts) {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function recCard(dev, c) {
-  const el = document.createElement("div");
-  el.className = "reccard";
-  const dur = (c.size || "").split("(")[0].trim();
-  const alert = (c.flags & 2) ? '<span class="alert" title="Con alerta">🔔</span>' : "";
-  const thumb = `/api/recordings/${encodeURIComponent(dev)}/thumb?path=${encodeURIComponent(c.path)}`;
-  el.innerHTML = `
-    <div class="recthumb">
-      <img data-src="${esc(thumb)}" alt="" decoding="async" onerror="this.style.display='none'">
-      <span class="play">▶</span>${alert}
-      <span class="dur">${esc(dur)}</span>
-    </div>
-    <div class="recmeta"><div class="t">${esc(fmtClipTime(c.date))}</div><div class="s">${esc(c.size)}</div></div>`;
-  el.addEventListener("click", () => openRecPlayer(dev, c));
-  return el;
-}
-
-function openRecPlayer(dev, c) {
-  const url = `/api/recordings/${dev}/video.mp4?path=${encodeURIComponent(c.path)}`;
-  $("#recPlayTitle").textContent =
-    `${recSelected?.name || ""} — ${fmtClipTime(c.date)}`;
-  $("#recPlayInfo").textContent = "Preparando vídeo…  " + (c.size || "");
-  const v = $("#recVideo");
-  v.pause(); v.removeAttribute("src"); v.load();   // limpiar carga previa colgada
-  v.onplaying = () => { $("#recPlayInfo").textContent = c.size || ""; };
-  v.onerror = () => { $("#recPlayInfo").textContent = "No se pudo reproducir esta grabación."; };
-  $("#recDownload").href = url;
-  $("#recPlayer").hidden = false;
-  v.src = url;
-  v.load();
-  v.play().catch(() => {});
-}
-
+// El reproductor rápido (modal) lo usa «Grabación local» de una cámara del mosaico.
 function closeRecPlayer() {
   const v = $("#recVideo");
   v.pause(); v.removeAttribute("src"); v.load();
   $("#recPlayer").hidden = true;
 }
-
-$("#recLoad").addEventListener("click", loadClips);
 $("#recPlayClose").addEventListener("click", closeRecPlayer);
 $("#recPlayer").addEventListener("click", (e) => { if (e.target.id === "recPlayer") closeRecPlayer(); });
 
