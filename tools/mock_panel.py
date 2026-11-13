@@ -314,6 +314,8 @@ def is_admin_path(path: str, method: str) -> bool:
         return True
     if path == "/api/mosaic" and method == "DELETE":          # A2: apaga el mosaico de todos
         return True
+    if path in ("/api/recordings/config", "/api/ptz/refresh"):   # A4: config completa / claves ONVIF
+        return True
     return False
 
 
@@ -832,6 +834,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/recordings/devices" and method == "GET":
             return self.json(self._rec_devices())
         if path == "/api/recordings/config" and method == "GET":
+            self._require_admin()
             return self.json({"recording": d["rec_cfg"]})
         mr = m(r"/api/recordings/([^/]+)/(clips|thumb|video\.mp4|file|config)")
         if mr:
@@ -895,7 +898,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/settings":
             if method == "GET":
-                return self.json(dict(d["settings"]))
+                return self.json(self._settings_view())
             if method == "POST":
                 b = self.body_json()
                 s = d["settings"]
@@ -907,6 +910,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(dict(s))
         if path == "/api/settings/encoding":
             if method == "GET":
+                self._require_admin()                 # A4: solo admin
                 return self.json({"encoding": dict(d["encoding"]),
                                   "disk": {"total": 500_000_000_000, "free": 310_000_000_000,
                                            "used": 190_000_000_000},
@@ -1010,6 +1014,15 @@ class Handler(BaseHTTPRequestHandler):
     def _require_admin(self):
         if self.user["role"] != "admin":
             raise ApiError(403, "requiere administrador")
+
+    def _settings_view(self) -> dict:
+        """A4: igual que main.py. Mismas claves siempre (app.js hace s.ports.join);
+        a un no-admin se le vacían los valores de red."""
+        s = DATA["settings"]
+        if self.user["role"] == "admin":
+            return dict(s)
+        return {"logo": s["logo"], "site_name": s["site_name"], "cidr": "", "ports": [],
+                "channels": None, "concurrency": None, "connect_timeout": None}
 
     def _sees_all(self) -> bool:
         return self.user["role"] == "admin" or bool(self.user.get("_kiosk"))

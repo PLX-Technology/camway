@@ -630,6 +630,10 @@ def _is_admin_path(path: str, method: str) -> bool:
     # POST, lo hace cada usuario con SUS cámaras: ver mosaic_set.)
     if path == "/api/mosaic" and method == "DELETE":
         return True
+    # Config completa de grabación y redetección de PTZ: la segunda devuelve las
+    # credenciales ONVIF de las cámaras PTZ, así que solo admin (cualquier método).
+    if path in ("/api/recordings/config", "/api/ptz/refresh"):
+        return True
     return False
 
 
@@ -2030,7 +2034,10 @@ async def refresh_ptz() -> dict:
 
 
 @app.post("/api/ptz/refresh")
-async def ptz_refresh():
+async def ptz_refresh(request: Request):
+    # Devuelve la config PTZ COMPLETA, con usuario y clave ONVIF de cada cámara:
+    # solo admin (además del middleware, por si cambia el prefijo).
+    _require_admin(request)
     return {"ptz": await refresh_ptz()}
 
 
@@ -2317,6 +2324,7 @@ async def _republish_device(device_id: str, include_lo: bool = True) -> None:
 @app.get("/api/recordings/config")
 async def recordings_config(request: Request):
     """Toda la config de grabación (admin). Por defecto vacío = nada graba."""
+    _require_admin(request)
     return {"recording": store.get("recording") or {}}
 
 
@@ -2637,17 +2645,32 @@ async def delete_credential(cred_id: int):
     return {"ok": True}
 
 
-@app.get("/api/settings")
-async def get_settings():
-    return {
-        "cidr": store.get("cidr", DEFAULT_CIDR),
-        "ports": store.get("ports", [554, 8554, 10554, 5554]),
-        "channels": store.get("channels", 8),
-        "concurrency": store.get("concurrency", 200),
-        "connect_timeout": store.get("connect_timeout", 1.2),
+def _settings_view(full: bool) -> dict:
+    """Ajustes para el panel. `app.js` los pide al arrancar con CUALQUIER rol
+    (`loadSettings`) y hace `s.ports.join(...)`, así que la forma no cambia: a un
+    no-admin se le vacían los valores de red (segmento, puertos, tiempos) y solo
+    se le dan el logo y el nombre del sitio (que ya son públicos en /api/me)."""
+    out = {
         "logo": store.get("logo", ""),
         "site_name": store.get("site_name", "") or "",
     }
+    if full:
+        out.update({
+            "cidr": store.get("cidr", DEFAULT_CIDR),
+            "ports": store.get("ports", [554, 8554, 10554, 5554]),
+            "channels": store.get("channels", 8),
+            "concurrency": store.get("concurrency", 200),
+            "connect_timeout": store.get("connect_timeout", 1.2),
+        })
+    else:
+        out.update({"cidr": "", "ports": [], "channels": None,
+                    "concurrency": None, "connect_timeout": None})
+    return out
+
+
+@app.get("/api/settings")
+async def get_settings(request: Request):
+    return _settings_view(request.state.user["role"] == "admin")
 
 
 @app.post("/api/settings")
@@ -2657,7 +2680,7 @@ async def set_settings(payload: dict = Body(...)):
             store.set(key, payload[key])
     if "site_name" in payload:                  # nombre del taladro/sitio de esta instancia
         store.set("site_name", " ".join(str(payload["site_name"] or "").split())[:60])
-    return await get_settings()
+    return _settings_view(True)               # POST solo lo alcanza admin (auth_gate)
 
 
 def _recipient_view(r: dict) -> dict:
@@ -2837,9 +2860,11 @@ async def test_alert(request: Request, payload: dict = Body(...)):
 
 
 @app.get("/api/settings/encoding")
-async def get_encoding_settings():
+async def get_encoding_settings(request: Request):
     """Parámetros de calidad del transcode (resolución, fps, bitrate) + espacio
-    de disco y nº de cámaras grabando, para estimar días de grabación en la UI."""
+    de disco y nº de cámaras grabando, para estimar días de grabación en la UI.
+    Solo admin: el panel solo lo pide en Ajustes de administrador."""
+    _require_admin(request)
     import shutil
     try:
         du = shutil.disk_usage(RECORD_DIR)
