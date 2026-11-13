@@ -289,7 +289,8 @@ function openEvents() {
   state.sse = sse;
 
   sse.onmessage = (ev) => {
-    const e = JSON.parse(ev.data);
+    let e;
+    try { e = JSON.parse(ev.data); } catch (_) { return; }   // evento ilegible: se ignora
 
     if (e.stage === "error") {
       toast(e.message, true);
@@ -327,7 +328,13 @@ function openEvents() {
     }
   };
 
-  sse.onerror = () => { sse.close(); state.sse = null; };
+  // Si se corta la conexión a media exploración, no dejar la UI «escaneando».
+  sse.onerror = () => {
+    sse.close();
+    if (state.sse === sse) state.sse = null;
+    setScanning(false);
+    toast("Se perdió la conexión con el escaneo; revisa el inventario o vuelve a lanzarlo", true);
+  };
 }
 
 // --------------------------------------------------------------- equipos
@@ -399,22 +406,26 @@ function renderDevice(dev, animate) {
   card.querySelector('[data-act="rename"]').addEventListener("click", async () => {
     const name = prompt("Nombre para este equipo", dev.name || "");
     if (name === null) return;
-    await api(`/api/devices/${dev.id}`, {
-      method: "PATCH", body: JSON.stringify({ name }),
-    });
-    dev.name = name;
-    card.querySelector("[data-name]").textContent = name;
+    try {
+      await api(`/api/devices/${dev.id}`, {
+        method: "PATCH", body: JSON.stringify({ name }),
+      });
+      dev.name = name;
+      card.querySelector("[data-name]").textContent = name;
+    } catch (err) { toast("No se pudo renombrar: " + err.message, true); }
   });
 
   card.querySelector('[data-act="osd"]').addEventListener("click", () => openOsdModal(dev));
 
   card.querySelector('[data-act="forget"]').addEventListener("click", async () => {
     if (!confirm(`¿Quitar ${dev.host} del inventario?`)) return;
-    await api(`/api/devices/${dev.id}`, { method: "DELETE" });
-    state.devices.delete(dev.id);
-    card.remove();
-    updateEmpty();
-    pollHealth();
+    try {
+      await api(`/api/devices/${dev.id}`, { method: "DELETE" });
+      state.devices.delete(dev.id);
+      card.remove();
+      updateEmpty();
+      pollHealth();
+    } catch (err) { toast("No se pudo quitar el equipo: " + err.message, true); }
   });
 
   card.querySelectorAll("[data-publish]").forEach((btn) => {
@@ -1658,16 +1669,18 @@ function loadAiConfig(streamId) {
   }
 }
 
-function saveAiConfig(streamId, cfg) {
-  try { localStorage.setItem(AI_KEY + streamId, JSON.stringify(cfg)); } catch (_) {}
-  // Fuente de verdad para el detector server-side.
-  api(`/api/streams/${streamId}/ai`, {
+// Guarda la config en el servidor (fuente de verdad del detector server-side)
+// y, solo si la aceptó, en este navegador. La promesa RECHAZA si el servidor no
+// la guardó: quien la llama decide cómo avisar (nada de «IA activada» falso).
+async function saveAiConfig(streamId, cfg) {
+  await api(`/api/streams/${encodeURIComponent(streamId)}/ai`, {
     method: "PUT",
     body: JSON.stringify({
       enabled: cfg.enabled, target: cfg.target, min_score: cfg.minScore,
       action: cfg.action, zone: cfg.zone, schedule: cfg.schedule,
     }),
-  }).catch(() => {});
+  });
+  try { localStorage.setItem(AI_KEY + streamId, JSON.stringify(cfg)); } catch (_) {}
 }
 
 function serverCfgToLocal(s, streamId) {
@@ -2823,7 +2836,10 @@ $("#aiModal").addEventListener("click", (e) => {
 $("#aiSave").addEventListener("click", async () => {
   if (!aiModalCtrl) return;
   const ctrl = aiModalCtrl;
-  ctrl.config = {
+  const btnSave = $("#aiSave");
+  if (btnSave.disabled) return;   // ya hay un guardado en curso
+  btnSave.disabled = true;
+  const next = {
     enabled: $("#aiEnabled").checked,
     target: $("#aiTarget").value,
     action: $("#aiAction").value,
@@ -2837,7 +2853,16 @@ $("#aiSave").addEventListener("click", async () => {
       end: $("#aiEnd").value,
     },
   };
-  saveAiConfig(ctrl.streamId, ctrl.config);
+  try {
+    await saveAiConfig(ctrl.streamId, next);
+  } catch (err) {
+    // El servidor no la guardó: la teja conserva su config anterior, no se
+    // anuncia «IA activada» y el modal queda abierto para reintentar.
+    toast("No se guardó la configuración de IA: " + err.message, true);
+    btnSave.disabled = false;
+    return;
+  }
+  ctrl.config = next;
   refreshAiButton(ctrl);
   refreshZoneTag(ctrl);
   refreshSchedTag(ctrl);
@@ -2863,8 +2888,9 @@ $("#aiSave").addEventListener("click", async () => {
       } catch (err) {
         toast(err.message, true);
         ctrl.config.enabled = false;
-        saveAiConfig(ctrl.streamId, ctrl.config);
         refreshAiButton(ctrl);
+        try { await saveAiConfig(ctrl.streamId, ctrl.config); }
+        catch (e2) { toast("No se pudo desactivar la IA en el servidor: " + e2.message, true); }
       } finally {
         btn.disabled = false;
         btn.textContent = "Guardar";
@@ -2874,6 +2900,7 @@ $("#aiSave").addEventListener("click", async () => {
     aiEngine.unregister(ctrl);
     toast(`IA desactivada en ${ctrl.title}`);
   }
+  btnSave.disabled = false;
   closeAiModal();
 });
 
@@ -3223,7 +3250,9 @@ $("#logoFile").addEventListener("change", async (e) => {
 });
 
 $("#btnLogoClear").addEventListener("click", async () => {
-  await api("/api/settings", { method: "POST", body: JSON.stringify({ logo: "" }) }).catch(() => {});
+  try {
+    await api("/api/settings", { method: "POST", body: JSON.stringify({ logo: "" }) });
+  } catch (err) { return toast("No se pudo quitar el logo: " + err.message, true); }
   state.logo = "";
   showLogoPreview("");
   $("#logoHint").textContent = "Logo quitado.";
