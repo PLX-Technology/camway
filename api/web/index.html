@@ -535,29 +535,36 @@
 </div>
 
 <!-- ------------------------------------------------ VISTA DVR (cuadrícula limpia) -->
-<div id="dvrView" class="dvrview" hidden>
+<div id="dvrView" class="dvrview" role="region" aria-label="Vista DVR" hidden>
   <div class="dvr-bar">
+    <svg width="22" height="22" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" fill="none" stroke="#4C8DFF" stroke-width="3"/><circle cx="14" cy="14" r="4.5" fill="#4C8DFF"/><circle cx="22" cy="6" r="2.6" fill="#F04438"/></svg>
     <span class="dvr-title" id="dvrTitle"></span>
-    <select id="dvrLayout" class="dvr-sel" title="Cámaras por pantalla" aria-label="Cámaras por pantalla">
-      <option value="4" selected>2×2 (4)</option>
-      <option value="9">3×3 (9)</option>
-      <option value="16">4×4 (16)</option>
-      <option value="1">1 cámara</option>
-    </select>
-    <span class="dvr-pager" id="dvrPager">
-      <button id="dvrPrev" class="dvr-btn" title="Página anterior (←)" aria-label="Página anterior">◀</button>
-      <span id="dvrPageLbl" aria-live="polite">1/1</span>
-      <button id="dvrNext" class="dvr-btn" title="Página siguiente (→)" aria-label="Página siguiente">▶</button>
-    </span>
-    <span class="dvr-sp"></span>
-    <button id="dvrFull" class="dvr-btn" title="Pantalla completa" aria-label="Pantalla completa">⛶</button>
-    <button id="dvrClose" class="dvr-btn" title="Cerrar vista DVR (Esc)" aria-label="Cerrar vista DVR">✕</button>
+    <time class="dvr-clock" id="dvrClock"></time>
+    <div class="dvr-tools">
+      <span class="dvr-lbl" id="dvrSegLbl">Rejilla</span>
+      <div class="cw-seg" id="dvrSeg" role="group" aria-labelledby="dvrSegLbl">
+        <button type="button" data-layout="auto" aria-pressed="true" title="Rejilla según el número de cámaras">Auto</button>
+        <button type="button" data-layout="1" aria-pressed="false">1</button>
+        <button type="button" data-layout="4" aria-pressed="false">2×2</button>
+        <button type="button" data-layout="9" aria-pressed="false">3×3</button>
+        <button type="button" data-layout="16" aria-pressed="false">4×4</button>
+      </div>
+      <span class="dvr-pager" id="dvrPager">
+        <span id="dvrPageLbl" class="dvr-lbl" aria-live="polite"></span>
+        <button id="dvrPrev" class="cw-ib" type="button" title="Página anterior (←)" aria-label="Página anterior"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 18-6-6 6-6"/></svg></button>
+        <button id="dvrNext" class="cw-ib" type="button" title="Página siguiente (→)" aria-label="Página siguiente"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 18 6-6-6-6"/></svg></button>
+      </span>
+      <span class="dvr-count dvr-lbl" id="dvrCount"></span>
+      <button id="dvrFull" class="cw-ib" type="button" title="Pantalla completa" aria-label="Pantalla completa"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <button id="dvrClose" class="cw-ib" type="button" title="Cerrar vista DVR (Esc)" aria-label="Cerrar vista DVR"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
   </div>
   <div id="dvrGrid" class="dvr-grid"></div>
   <div id="dvrMax" class="dvr-max">
     <video id="dvrMaxVideo" autoplay playsinline muted></video>
     <div class="dvr-state" id="dvrMaxState"></div>
     <div class="dvr-name" id="dvrMaxName"></div>
+    <button id="dvrUnmax" class="cw-ib cw-ib--glass dvr-unmax" type="button" title="Volver a la cuadrícula (Esc)" aria-label="Volver a la cuadrícula"><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg></button>
     <div class="dvr-hint">doble clic o Esc para volver</div>
   </div>
 </div>
