@@ -2233,7 +2233,7 @@ document.addEventListener("click", (e) => {
   const el = $(b.dataset.copy);
   if (!el) return;
   copyText(el.textContent).then((ok) => {
-    if (ok) { b.textContent = "Copiado ✓"; setTimeout(() => (b.textContent = "Copiar"), 1200); }
+    if (ok) { b.textContent = "Copiado"; setTimeout(() => (b.textContent = "Copiar"), 1200); }
     else toast("Selecciona el texto y cópialo manualmente", true);
   });
 });
