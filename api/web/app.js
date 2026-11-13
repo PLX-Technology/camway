@@ -2108,28 +2108,49 @@ function dropLive(ctrl) {
 // los espectadores), así que esto es baratísimo aunque miren varias personas.
 let snapTimer = null;
 
+// Un fotograma que no responde NO puede dejar la teja congelada y sin aviso:
+// cada petición tiene su plazo; tras unos fallos seguidos la teja pasa a «sin
+// conexión» y se reintenta más despacio hasta que la cámara vuelva.
+const SNAP_TIMEOUT_MS = 8000;
+const SNAP_FAILS_OFFLINE = 3;
+const SNAP_RETRY_OFFLINE_MS = 5000;
+
 function bumpSnap(ctrl) {
   if (ctrl.videoReady) return;   // el vídeo ya tomó el relevo; no refrescar
   if (wallOffscreen()) return;   // muro tapado (otra pestaña / DVR): sin peticiones
   const img = ctrl.snap;
   if (!img || !img.isConnected) return;  // teja no colocada (kiosco): no cuenta
+  const t0 = performance.now();
+  // Teja ya «sin conexión»: reintento espaciado, sin contar para el gobernador.
+  if ((ctrl.snapFails || 0) >= SNAP_FAILS_OFFLINE && !ctrl.snapLoading &&
+      t0 - (ctrl.snapLastTry || 0) < SNAP_RETRY_OFFLINE_MS) return;
   qAtt++;
   if (ctrl.snapLoading) { qSkip++; return; }  // petición en vuelo: iba atrasado (señal de presión)
   ctrl.snapLoading = true;
-  const t0 = performance.now();
+  ctrl.snapLastTry = t0;
   const next = new Image();
-  next.onload = () => {
-    img.src = next.src; ctrl.snapLoading = false;
-    qLatSum += performance.now() - t0; qLatN++;
-    ctrl.snapFails = 0; setSnapOffline(ctrl, false);
-  };
-  next.onerror = () => {
+  let settled = false;
+  const settle = (ok) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
     ctrl.snapLoading = false;
-    ctrl.snapFails = (ctrl.snapFails || 0) + 1;
-    // El servidor da 503 cuando la cámara lleva >30s sin fotograma nuevo
-    // (ver STALE_HIDE en wallcache). Tras unos fallos → "sin conexión".
-    if (ctrl.snapFails >= 3) setSnapOffline(ctrl, true);
+    if (ok) {
+      img.src = next.src;
+      qLatSum += performance.now() - t0; qLatN++;
+      ctrl.snapFails = 0; setSnapOffline(ctrl, false);
+    } else {
+      ctrl.snapFails = (ctrl.snapFails || 0) + 1;
+      // El servidor da 503 cuando la cámara lleva >30s sin fotograma nuevo
+      // (ver STALE_HIDE en wallcache). Tras unos fallos → "sin conexión".
+      if (ctrl.snapFails >= SNAP_FAILS_OFFLINE) setSnapOffline(ctrl, true);
+    }
   };
+  // Sin respuesta a tiempo: se cancela la carga y cuenta como fallo.
+  const timer = setTimeout(() => { next.onload = next.onerror = null; next.src = ""; settle(false); },
+                           SNAP_TIMEOUT_MS);
+  next.onload = () => settle(true);
+  next.onerror = () => settle(false);
   const ww = qEffWidth();
   const w = ww ? `&w=${ww}` : "";
   next.src = `${ctrl.frameUrl}?t=${Date.now()}${w}`;
