@@ -45,6 +45,7 @@
   // a fotograma; como la salida es temporal, ese evento no debe llegar a app.js.
   // Captura en window: corre antes que cualquier oyente de document.
   window.addEventListener("fullscreenchange", (e) => {
+    placeToast();   // primero el aviso: tiene que seguir al elemento aunque el evento se trague
     if (fsSwallowUntil && performance.now() < fsSwallowUntil && !document.fullscreenElement) {
       fsSwallowUntil = 0;
       e.stopImmediatePropagation();
@@ -299,6 +300,30 @@
   // app.js solo pone el texto y la clase `err`; un error se anuncia con
   // prioridad (role=alert) y el resto con cortesía (role=status).
   const toastEl = document.getElementById("toast");
+
+  // Con un elemento en pantalla completa, nada fuera de él se ve, y #toast vive en
+  // <body>: los avisos (p. ej. un error al guardar) no se veían. Mientras haya
+  // pantalla completa, el MISMO #toast (sin clonar: app.js lo busca por id cada vez)
+  // se mueve dentro de ese elemento; al salir, vuelve a <body>. Con la salida
+  // temporal de D12 (ventana abierta sobre pantalla completa) también vuelve a
+  // <body>, que es donde se ve la ventana, y regresa al entrar de nuevo.
+  const TOAST_NO_HOST = /^(VIDEO|AUDIO|IMG|CANVAS|IFRAME|OBJECT|EMBED|SVG|INPUT|SELECT|TEXTAREA|BUTTON)$/;
+  let toastHostObserver = null;
+  function placeToast() {
+    if (!toastEl) return;
+    const cur = document.fullscreenElement;
+    // Los elementos que no pintan hijos (<video>, <img>…) y <body>/<html> no sirven de anfitrión.
+    const host = cur && cur !== document.body && cur !== document.documentElement &&
+      !TOAST_NO_HOST.test(cur.tagName.toUpperCase()) ? cur : document.body;
+    if (toastEl.parentNode !== host) host.appendChild(toastEl);
+    if (toastHostObserver) { toastHostObserver.disconnect(); toastHostObserver = null; }
+    if (host !== document.body) {
+      // Si app.js reescribe los hijos del anfitrión (p. ej. rehace la teja), el aviso se recoloca.
+      toastHostObserver = new MutationObserver(() => { if (toastEl.parentNode !== host) placeToast(); });
+      toastHostObserver.observe(host, { childList: true });
+    }
+  }
+
   if (toastEl) {
     const syncToast = () => {
       const err = toastEl.classList.contains("err");
