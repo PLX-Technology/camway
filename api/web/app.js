@@ -827,18 +827,14 @@ function startLiveMosaic() {
   snapTimer = setInterval(snapTick, Math.max(700, qEffMs()));
 }
 
-// Crea una teja (video + player + IA + arrastre) y devuelve {el, ctrl}.
-function makeTile(tile) {
-  const el = document.createElement("div");
-  el.className = "tile";
-  el.dataset.streamId = tile.stream_id;
-  el.draggable = true;
-  // Accesible por teclado: se enfoca con Tab y Enter la amplía/restaura (igual
-  // que el doble clic); Escape restaura una teja ampliada dentro de la página.
-  el.tabIndex = 0;
-  el.setAttribute("role", "group");
-  el.setAttribute("aria-label", `Cámara ${tile.title}`);
-  el.innerHTML = `
+// ---- teja del mosaico: se arma en piezas con nombre (HTML, reproductor, audio,
+// hablar, estado, ampliar, arrastre, botones de admin, PTZ). makeTile las une.
+
+// HTML interno de una teja. Todo dato de la API va por esc() (los nombres y los
+// banners los escribe cualquier equipo de la LAN).
+function tileHtml(tile) {
+  const admin = isAdmin();
+  return `
     <img class="snap" alt="">
     <video playsinline muted></video>
     <canvas class="detoverlay"></canvas>
@@ -860,64 +856,91 @@ function makeTile(tile) {
       <span class="chip">${esc(tile.codec)}</span>
       ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio" aria-label="Oír el audio de la cámara" aria-pressed="false">🔇</button>` : ""}
       ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)" aria-label="Hablar por el altavoz de la cámara (mantén pulsado)">🎙️</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local" aria-label="Grabación local de la cámara">⏺</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)" aria-label="Optimizar para tiempo real">⚡</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}" aria-label="Activar o desactivar el PTZ">🕹</button>` : ""}
+      ${admin ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local" aria-label="Grabación local de la cámara">⏺</button>` : ""}
+      ${admin ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)" aria-label="Optimizar para tiempo real">⚡</button>` : ""}
+      ${admin ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}" aria-label="Activar o desactivar el PTZ">🕹</button>` : ""}
       <button class="ghost small ai" data-ai title="Comportamiento IA" aria-label="Comportamiento IA de la cámara"><span class="dotai"></span>IA</button>
       <button class="ghost small" data-play>Ver</button>
     </div>`;
+}
 
-  const video = el.querySelector("video");
-  const snap = el.querySelector("img.snap");
-  const stateEl = el.querySelector(".tilestate");
-  const label = stateEl.querySelector("span");
-  const btn = el.querySelector("[data-play]");
-  const aiBtn = el.querySelector("[data-ai]");
-  const muteBtn = el.querySelector("[data-mute]");
-  const alertEl = el.querySelector(".aialert");
+// Elemento de la teja: enfocable con Tab, Enter la amplía/restaura (igual que el
+// doble clic) y Escape restaura una ampliada dentro de la página.
+function createTileElement(tile) {
+  const el = document.createElement("div");
+  el.className = "tile";
+  el.dataset.streamId = tile.stream_id;
+  el.draggable = true;
+  el.tabIndex = 0;
+  el.setAttribute("role", "group");
+  el.setAttribute("aria-label", `Cámara ${tile.title}`);
+  el.innerHTML = tileHtml(tile);
+  return el;
+}
+
+// Reproductor WebRTC de la teja: flujo ligero por defecto, alto al ampliar.
+function createTilePlayer(tile, video) {
   const player = new WhepPlayer(tile.whep, video, WALL_WHEP_OPTS);
   player.urlLo = tile.whep;                      // substream ligero (por defecto)
   player.urlHi = tile.whep_hi || tile.whep;      // 3K para pantalla completa
+  return player;
+}
 
-  // Audio: el <video> arranca muteado (política de autoplay). Al pulsar 🔇/🔊
-  // —gesto de usuario— se desmutea y suena el audio de la cámara (solo las
-  // que publican G.711/PCMA; las AAC no traen este botón). Solo una cámara
-  // con sonido a la vez para no mezclar varias.
-  if (muteBtn) {
-    muteBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const on = video.muted;               // se va a encender
-      if (on) {
-        state.players.forEach((p, sid) => {  // silenciar las demás
-          if (sid !== tile.stream_id && p.video) { p.video.muted = true; }
-        });
-        document.querySelectorAll("[data-mute]").forEach((b) => {
-          b.textContent = "🔇"; b.setAttribute("aria-pressed", "false");
-        });
-        if (!player.active) { const c = state.tiles.get(tile.stream_id); if (c) goLive(c); }
-      }
-      video.muted = !on;
-      video.volume = 1;
-      muteBtn.textContent = on ? "🔊" : "🔇";
-      muteBtn.setAttribute("aria-pressed", on ? "true" : "false");
-    });
-  }
+// Audio: el <video> arranca muteado (política de autoplay). Al pulsar 🔇/🔊
+// —gesto de usuario— se desmutea y suena el audio de la cámara (solo las
+// que publican G.711/PCMA; las AAC no traen este botón). Solo una cámara
+// con sonido a la vez para no mezclar varias.
+function wireTileAudio(el, tile, video, player) {
+  const muteBtn = el.querySelector("[data-mute]");
+  if (!muteBtn) return;
+  muteBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const on = video.muted;               // se va a encender
+    if (on) {
+      state.players.forEach((p, sid) => {  // silenciar las demás
+        if (sid !== tile.stream_id && p.video) { p.video.muted = true; }
+      });
+      document.querySelectorAll("[data-mute]").forEach((b) => {
+        b.textContent = "🔇"; b.setAttribute("aria-pressed", "false");
+      });
+      if (!player.active) { const c = state.tiles.get(tile.stream_id); if (c) goLive(c); }
+    }
+    video.muted = !on;
+    video.volume = 1;
+    muteBtn.textContent = on ? "🔊" : "🔇";
+    muteBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
 
-  // Push-to-talk: mantener pulsado 🎙️ habla por el altavoz de la cámara.
+// Push-to-talk: mantener pulsado 🎙️ habla por el altavoz de la cámara.
+function wireTileTalk(el, tile) {
   const talkBtn = el.querySelector("[data-talk]");
-  if (talkBtn) {
-    const press = (ev) => {
-      ev.stopPropagation(); ev.preventDefault();
-      startTalk(tile.stream_id, talkBtn);
-    };
-    const release = (ev) => { if (ev) ev.stopPropagation(); stopTalk(); };
-    talkBtn.addEventListener("pointerdown", press);
-    talkBtn.addEventListener("pointerup", release);
-    talkBtn.addEventListener("pointerleave", release);
-    talkBtn.addEventListener("pointercancel", release);
-    talkBtn.addEventListener("click", (ev) => ev.stopPropagation());
-  }
+  if (!talkBtn) return;
+  const press = (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    startTalk(tile.stream_id, talkBtn);
+  };
+  const release = (ev) => { if (ev) ev.stopPropagation(); stopTalk(); };
+  talkBtn.addEventListener("pointerdown", press);
+  talkBtn.addEventListener("pointerup", release);
+  talkBtn.addEventListener("pointerleave", release);
+  talkBtn.addEventListener("pointercancel", release);
+  talkBtn.addEventListener("click", (ev) => ev.stopPropagation());
+}
 
+// Texto y nombre accesible del botón Ver/Parar según si el vídeo está activo.
+function refreshPlayBtn(el, title, player) {
+  const btn = el.querySelector("[data-play]");
+  if (!btn) return;
+  btn.textContent = player.active ? "Parar" : "Ver";
+  btn.setAttribute("aria-label", `${player.active ? "Parar el vídeo de" : "Ver en vivo"} ${title}`);
+}
+
+// Estado de conexión sobre la teja y botón Ver/Parar.
+function wireTileState(el, tile, player) {
+  const stateEl = el.querySelector(".tilestate");
+  const label = stateEl.querySelector("span");
+  const btn = el.querySelector("[data-play]");
   const setState = (text) => {
     const live = text === "en vivo";
     stateEl.classList.toggle("oculto", live);
@@ -926,10 +949,9 @@ function makeTile(tile) {
       const trabajando = text === "conectando" || text.startsWith("reconectando");
       stateEl.querySelector(".spinner").style.display = trabajando ? "" : "none";
     }
-    btn.textContent = player.active ? "Parar" : "Ver";
-    btn.setAttribute("aria-label", `${player.active ? "Parar el vídeo de" : "Ver en vivo"} ${tile.title}`);
+    refreshPlayBtn(el, tile.title, player);
   };
-  player.onState = (state, n) => setState(whepStateText(state, n));
+  player.onState = (st, n) => setState(whepStateText(st, n));
   state.players.set(tile.stream_id, player);
 
   btn.addEventListener("click", () => {
@@ -937,6 +959,11 @@ function makeTile(tile) {
     if (!c) return;
     if (c.live) goSnap(c); else goLive(c);
   });
+  stateEl.classList.add("oculto");   // en fotograma no hay spinner de conexión
+}
+
+// Ampliar/restaurar: doble clic, Enter o Escape.
+function wireTileEnlarge(el, tile) {
   const toggleEnlarge = () => {
     const c = state.tiles.get(tile.stream_id);
     if (!c) return;
@@ -957,9 +984,11 @@ function makeTile(tile) {
     if (e.key === "Enter") { e.preventDefault(); toggleEnlarge(); }
     else if (e.key === "Escape" && el.classList.contains("maximized")) { e.preventDefault(); toggleEnlarge(); }
   });
+}
 
-  // Arrastre de la teja (mueve el nodo, el video no se corta). En vista
-  // ampliada/pantalla completa, arrastrar es para DESPLAZAR el zoom, no reordenar.
+// Arrastre de la teja (mueve el nodo, el video no se corta). En vista
+// ampliada/pantalla completa, arrastrar es para DESPLAZAR el zoom, no reordenar.
+function wireTileDrag(el, tile) {
   el.addEventListener("dragstart", (e) => {
     if (el.classList.contains("maximized") || document.fullscreenElement === el) {
       e.preventDefault();
@@ -973,11 +1002,18 @@ function makeTile(tile) {
     el.classList.remove("dragging");
     $$(".zonebox.dragover").forEach((z) => z.classList.remove("dragover"));
   });
+}
 
-  const ctrl = {
+// Controlador de la teja: lo que el resto del panel (IA, zoom, alarmas, refresco)
+// lee y escribe.
+function createTileCtrl(tile, el, video, player) {
+  return {
     streamId: tile.stream_id,
     title: tile.title,
-    el, video, snap, player, aiBtn, alertEl,
+    el, video, player,
+    snap: el.querySelector("img.snap"),
+    aiBtn: el.querySelector("[data-ai]"),
+    alertEl: el.querySelector(".aialert"),
     frameUrl: tile.frame || `/api/wall/${tile.stream_id}/frame`,
     // Dimensiones de referencia para el overlay cuando el vídeo no corre
     // (las cajas del detector llegan normalizadas 0..1).
@@ -993,12 +1029,10 @@ function makeTile(tile) {
     lastDetections: [],   // detecciones normalizadas del último análisis
     zoom: { s: 1, x: 0, y: 0 },   // zoom digital en la vista ampliada
   };
-  stateEl.classList.add("oculto");   // en fotograma no hay spinner de conexión
-  refreshAiButton(ctrl);
-  refreshZoneTag(ctrl);
-  refreshSchedTag(ctrl);
-  aiBtn.addEventListener("click", () => openAiModal(ctrl));
+}
 
+// Botones de la barra solo para admin: grabación local y optimizar tiempo real.
+function wireTileAdminButtons(el, tile) {
   const recBtn = el.querySelector("[data-rec]");
   if (recBtn) recBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -1019,22 +1053,24 @@ function makeTile(tile) {
       optBtn.classList.remove("busy");
     }
   });
+}
 
-  // Ajuste por cámara: activar/desactivar PTZ (ONVIF). Solo admin. Se aplica en
-  // sitio (flechas y botón), sin rehacer el muro.
-  const ptzPad = el.querySelector(".ptzpad");
-  const ptzCfgBtn = el.querySelector("[data-ptzcfg]");
+// PTZ: botón de admin para activar/desactivar (se aplica en sitio, sin rehacer
+// el muro) y flechas visibles solo si la cámara tiene PTZ activado.
+function wireTilePtz(el, tile) {
+  const pad = el.querySelector(".ptzpad");
+  const cfgBtn = el.querySelector("[data-ptzcfg]");
   const paintPtz = () => {
-    ptzPad.hidden = !tile.ptz;
-    if (!ptzCfgBtn) return;
-    ptzCfgBtn.classList.toggle("ptzon", !!tile.ptz);
-    ptzCfgBtn.title = tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)";
+    pad.hidden = !tile.ptz;
+    if (!cfgBtn) return;
+    cfgBtn.classList.toggle("ptzon", !!tile.ptz);
+    cfgBtn.title = tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)";
   };
-  if (ptzCfgBtn) ptzCfgBtn.addEventListener("click", async (ev) => {
+  if (cfgBtn) cfgBtn.addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const enabling = !tile.ptz;
     if (!enabling && !(await uiConfirm(`¿Desactivar el PTZ de "${tile.title}"?`, { okLabel: "Desactivar", danger: true }))) return;
-    ptzCfgBtn.classList.add("busy");
+    cfgBtn.classList.add("busy");
     try {
       await api(`/api/devices/${tile.device_id}/ptz-config`, {
         method: "PUT", body: JSON.stringify({ enabled: enabling }) });
@@ -1045,34 +1081,51 @@ function makeTile(tile) {
     } catch (e) {
       toast("PTZ: " + e.message, true);
     } finally {
-      ptzCfgBtn.classList.remove("busy");
+      cfgBtn.classList.remove("busy");
     }
   });
 
-  // Controles PTZ (visibles solo si la cámara tiene PTZ activado): cada clic =
-  // un paso (mover y detener en la misma petición del servidor).
-  {
-    const pad = ptzPad;
-    paintPtz();
-    pad.querySelectorAll("[data-ptz]").forEach((b) => {
-      // Movimiento POR PASOS: cada clic = mover+detener en la MISMA petición del
-      // servidor. El stop siempre ocurre → es imposible que la cámara quede
-      // girando sin control (estas genéricas ignoran el Timeout ONVIF, así que
-      // NO usamos 'mantener pulsado'). Para mover más, se pulsa varias veces.
-      const dir = b.dataset.ptz;
-      b.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (b.classList.contains("busy")) return;
-        b.classList.add("busy");
-        try { await api(`/api/streams/${tile.stream_id}/ptz?dir=${dir}`); }
-        catch (err) { toast("PTZ: " + err.message, true); }
-        finally { setTimeout(() => b.classList.remove("busy"), 120); }
-      });
+  paintPtz();
+  pad.querySelectorAll("[data-ptz]").forEach((b) => {
+    // Movimiento POR PASOS: cada clic = mover+detener en la MISMA petición del
+    // servidor. El stop siempre ocurre → es imposible que la cámara quede
+    // girando sin control (estas genéricas ignoran el Timeout ONVIF, así que
+    // NO usamos 'mantener pulsado'). Para mover más, se pulsa varias veces.
+    const dir = b.dataset.ptz;
+    b.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (b.classList.contains("busy")) return;
+      b.classList.add("busy");
+      try { await api(`/api/streams/${tile.stream_id}/ptz?dir=${dir}`); }
+      catch (err) { toast("PTZ: " + err.message, true); }
+      finally { setTimeout(() => b.classList.remove("busy"), 120); }
     });
-    el.addEventListener("dblclick", (e) => {   // no maximizar al usar el pad
-      if (e.target.closest(".ptzpad")) e.stopPropagation();
-    }, true);
-  }
+  });
+  el.addEventListener("dblclick", (e) => {   // no maximizar al usar el pad
+    if (e.target.closest(".ptzpad")) e.stopPropagation();
+  }, true);
+}
+
+// Crea una teja (video + player + IA + arrastre) y devuelve {el, ctrl}.
+function makeTile(tile) {
+  const el = createTileElement(tile);
+  const video = el.querySelector("video");
+  const player = createTilePlayer(tile, video);
+
+  wireTileAudio(el, tile, video, player);
+  wireTileTalk(el, tile);
+  wireTileState(el, tile, player);
+  wireTileEnlarge(el, tile);
+  wireTileDrag(el, tile);
+
+  const ctrl = createTileCtrl(tile, el, video, player);
+  refreshAiButton(ctrl);
+  refreshZoneTag(ctrl);
+  refreshSchedTag(ctrl);
+  ctrl.aiBtn.addEventListener("click", () => openAiModal(ctrl));
+
+  wireTileAdminButtons(el, tile);
+  wireTilePtz(el, tile);
 
   setupZoom(ctrl);
   observeTileVisibility(ctrl);
@@ -2000,6 +2053,7 @@ function goLive(ctrl) {
   ctrl.videoReady = false;
   ctrl.el.classList.add("live");
   ctrl.player.start();
+  refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
   waitVideoFrame(ctrl);
 }
 
@@ -2044,6 +2098,7 @@ function dropLive(ctrl) {
   ctrl.videoReady = false;
   ctrl.el.classList.remove("live", "videoready");
   ctrl.player.stop();
+  refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
   ctrl.el.querySelector(".tilestate")?.classList.add("oculto");
 }
 
