@@ -923,6 +923,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/settings/whatsapp/unlink" and method == "POST":
             self._require_admin()
             return self.json({"ok": True, "state": "close"})
+        if path.startswith("/api/settings/alerts/recipients"):
+            self._require_alert_manager()
         if path == "/api/settings/alerts/recipients" and method == "POST":
             b = self.body_json()
             phone = "".join(ch for ch in str(b.get("phone") or "") if ch.isdigit())
@@ -994,6 +996,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.user["role"] != "admin":
             raise ApiError(403, "requiere administrador")
 
+    def _require_alert_manager(self):
+        if self.user["role"] not in ("admin", "seguridad"):
+            raise ApiError(403, "requiere administrador o jefe de seguridad")
+
     def _require_camera(self, device_id: str):
         if not user_allows(self.user, device_id):
             raise ApiError(403, "sin permiso sobre esa cámara")
@@ -1008,18 +1014,30 @@ class Handler(BaseHTTPRequestHandler):
         return {"whatsapp": bool(n), "email": False, "group": False}
 
     def _alerts_view(self) -> dict:
+        """Como `get_alert_settings` de main.py (A1): admin y seguridad ven los
+        destinatarios; el resto no. Reglas e historial, solo de sus cámaras
+        (admin: todo)."""
         d = DATA
+        manager = self.user["role"] in ("admin", "seguridad")
         cams = {}
         for sid, rule in d["alert_rules"].items():
             dev, s = find_stream(sid)
             if s and user_allows(self.user, dev["id"]):
                 cams[sid] = dict(DEFAULT_RULE, **rule)
+
+        def visible(e: dict) -> bool:
+            if self.user["role"] == "admin":
+                return True
+            dev, s = find_stream(e.get("stream_id") or "")
+            return bool(s) and user_allows(self.user, dev["id"])
+
         return {
             "channels": self._channels(), "site": d["settings"]["site_name"],
-            "recipients": [dict(r) for r in d["recipients"]],
+            "recipients": [dict(r) for r in d["recipients"]] if manager else [],
             "cameras": cams, "defaults": DEFAULT_RULE, "labels": LABELS,
-            "pending": 1, "log": [dict(e) for e in d["alert_log"]][:30],
-            "wa_state": "open",
+            "pending": 1 if manager else 0,
+            "log": [dict(e) for e in d["alert_log"] if visible(e)][:30],
+            "wa_state": "open" if manager else "",
         }
 
     def _wall(self) -> dict:

@@ -2634,27 +2634,51 @@ def _recipient_view(r: dict) -> dict:
             "enabled": r.get("enabled", True)}
 
 
+def _can_manage_alerts(request: Request) -> bool:
+    """Admin y jefe de seguridad gestionan los avisos (destinatarios y reglas).
+    El resto (viewer, kiosko) no ve teléfonos ni el estado del envío."""
+    return request.state.user["role"] in ("admin", "seguridad")
+
+
+def _require_alert_manager(request: Request) -> None:
+    if not _can_manage_alerts(request):
+        raise HTTPException(403, "requiere administrador o jefe de seguridad")
+
+
 @app.get("/api/settings/alerts")
 async def get_alert_settings(request: Request):
     """Avisos por WhatsApp/correo: canales listos (por entorno), destinatarios,
-    reglas por cámara y historial. No devuelve secretos. Quien no es admin solo
-    ve las reglas de SUS cámaras."""
+    reglas por cámara y historial. No devuelve secretos.
+
+    - admin: todo.
+    - seguridad: destinatarios (los gestiona), pero reglas e historial solo de
+      SUS cámaras.
+    - resto (viewer, kiosko): sin destinatarios (teléfonos), sin cola ni estado
+      de WhatsApp; reglas e historial solo de sus cámaras."""
     rec = notifier.recipients()
+    manager = _can_manage_alerts(request)
     cams = {}
     for sid in notifier.rules():
         s = store.stream(sid)
         if s and _user_allows(request, s["device_id"]):
             cams[sid] = notifier.rule(sid)
+
+    def _visible(entry: dict) -> bool:
+        if request.state.user["role"] == "admin":
+            return True
+        s = store.stream(entry.get("stream_id") or "")
+        return bool(s) and _user_allows(request, s["device_id"])
+
     return {
         "channels": notifmod.channels(sum(1 for r in rec if r.get("enabled", True))),
         "site": notifier.site(),
-        "recipients": [_recipient_view(r) for r in rec],
+        "recipients": [_recipient_view(r) for r in rec] if manager else [],
         "cameras": cams,
         "defaults": notifmod.DEFAULT_RULE,
         "labels": notifmod.LABELS,
-        "pending": notifier.pending(),
-        "log": list(notifier.log)[:30],
-        "wa_state": (await notifier.wa_status())["state"],
+        "pending": notifier.pending() if manager else 0,
+        "log": [e for e in list(notifier.log) if _visible(e)][:30],
+        "wa_state": (await notifier.wa_status())["state"] if manager else "",
     }
 
 
@@ -2698,7 +2722,8 @@ async def whatsapp_unlink(request: Request):
 
 
 @app.post("/api/settings/alerts/recipients")
-async def add_alert_recipient(payload: dict = Body(...)):
+async def add_alert_recipient(request: Request, payload: dict = Body(...)):
+    _require_alert_manager(request)
     try:
         rec = notifier.add_recipient(payload.get("name", ""), payload.get("phone", ""))
     except ValueError as e:
@@ -2714,7 +2739,8 @@ async def add_alert_recipient(payload: dict = Body(...)):
 
 
 @app.put("/api/settings/alerts/recipients/{rid}")
-async def put_alert_recipient(rid: str, payload: dict = Body(...)):
+async def put_alert_recipient(rid: str, request: Request, payload: dict = Body(...)):
+    _require_alert_manager(request)
     try:
         return {"recipient": _recipient_view(notifier.update_recipient(rid, payload))}
     except KeyError:
@@ -2722,14 +2748,16 @@ async def put_alert_recipient(rid: str, payload: dict = Body(...)):
 
 
 @app.delete("/api/settings/alerts/recipients/{rid}")
-async def delete_alert_recipient(rid: str):
+async def delete_alert_recipient(rid: str, request: Request):
+    _require_alert_manager(request)
     notifier.delete_recipient(rid)
     return {"ok": True}
 
 
 @app.post("/api/settings/alerts/recipients/{rid}/test")
-async def test_alert_recipient(rid: str):
+async def test_alert_recipient(rid: str, request: Request):
     """Mensaje de PRUEBA (solo texto) a UN número, para confirmar que le llega."""
+    _require_alert_manager(request)
     rec = next((r for r in notifier.recipients() if r["id"] == rid), None)
     if not rec:
         raise HTTPException(404, "destinatario desconocido")
