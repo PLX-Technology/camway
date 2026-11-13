@@ -166,6 +166,38 @@
     (items[0] || top.el).focus({ preventScroll: true });
   });
 
+  // ---------------------------------------------------------------- pestañas
+  // app.js cambia la clase `.active`; aquí se refleja en `aria-selected` y se
+  // añade el teclado de un tablist (flechas, Inicio, Fin), sin tocar app.js.
+  const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+  if (tabs.length) {
+    const syncTabs = () => {
+      tabs.forEach((t) => {
+        const on = t.classList.contains("active");
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        t.tabIndex = on ? 0 : -1; // tabulación "itinerante": una sola parada en el tablist
+      });
+    };
+    const tabObserver = new MutationObserver(syncTabs);
+    tabs.forEach((t) => tabObserver.observe(t, { attributes: true, attributeFilter: ["class"] }));
+    syncTabs();
+    const list = tabs[0].parentElement;
+    list.addEventListener("keydown", (e) => {
+      const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+      if (!keys.includes(e.key)) return;
+      const vis = tabs.filter((t) => t.getClientRects().length > 0); // los data-admin pueden estar ocultos
+      const i = vis.indexOf(document.activeElement);
+      if (i < 0) return;
+      let n = i;
+      if (e.key === "ArrowRight") n = (i + 1) % vis.length;
+      else if (e.key === "ArrowLeft") n = (i - 1 + vis.length) % vis.length;
+      else if (e.key === "Home") n = 0;
+      else n = vis.length - 1;
+      e.preventDefault();
+      vis[n].focus(); // activación manual (Enter/Espacio): cambiar de pestaña arranca cargas pesadas (muro, API)
+    });
+  }
+
   // ---------------------------------------------------------------- diálogos
   // Una cola: si dos partes piden diálogo a la vez, se muestran de a uno.
   let queue = Promise.resolve();
