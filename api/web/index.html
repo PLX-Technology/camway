@@ -482,103 +482,167 @@
 </div>
 
 <!-- Configuración de IA por cámara -->
-<div id="aiModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" hidden>
-  <div class="modalcard">
-    <div class="modalhead">
-      <h3 id="aiModalTitle">IA — <span id="aiCamName"></span></h3>
-      <button class="cw-ib cw-ib--sm" id="aiClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-    </div>
-    <p class="mo-intro">La detección corre en el servidor cuando está disponible; si no, en este navegador. El sonido suena solo en este navegador.</p>
+<div id="aiModal" class="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" hidden>
+  <div class="modalcard ai-card">
 
-    <label class="mo-switch"><input type="checkbox" id="aiEnabled" class="mo-sw"><span>Activar detección en esta cámara</span></label>
-
-    <div class="mo-grid mo-grid1">
-      <label class="gx-field">Qué detectar
-        <select id="aiTarget" class="gx-in">
-          <option value="vehiculo">Vehículo (auto, camión, bus, moto)</option>
-          <option value="persona">Persona</option>
-          <option value="ambos">Vehículo o persona</option>
-          <option value="fuego">Fuego o humo</option>
-          <option value="epp">Persona sin casco (EPP)</option>
-        </select>
+    <header class="ai-head">
+      <svg class="cw-icon ai-headicon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l1.8 4.7 4.7 1.8-4.7 1.8L12 16l-1.8-4.7-4.7-1.8 4.7-1.8z"/></svg>
+      <div class="ai-headtext">
+        <h2 id="aiModalTitle">Detección con IA · <span id="aiCamName"></span></h2>
+        <div class="ai-camsub" id="aiCamSub"></div>
+      </div>
+      <label class="mo-switch ai-onwrap">
+        <input type="checkbox" id="aiEnabled" class="mo-sw" role="switch" aria-label="Vigilar esta cámara">
+        <span class="ai-onlabel" id="aiOnLabel">Apagada</span>
       </label>
-      <label class="gx-field">Al detectar
-        <select id="aiAction" class="gx-in">
-          <option value="full">Pantalla completa y marco rojo</option>
-          <option value="frame">Solo marco rojo</option>
-          <option value="badge">Solo aviso en la esquina</option>
-        </select>
-      </label>
-      <label class="gx-field mo-span2">Confianza mínima: <strong id="aiScoreVal">40%</strong>
-        <input type="range" id="aiScore" class="mo-range" min="20" max="90" step="5" value="40">
-      </label>
-    </div>
+      <button class="cw-ib" id="aiClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </header>
 
-    <label class="mo-switch"><input type="checkbox" id="aiSound" class="mo-sw"><span>Sonido de alarma al detectar</span></label>
-
-    <div class="mo-zone">
-      <button class="cw-btn cw-btn--sm" id="aiZoneBtn" type="button">Definir zona de detección…</button>
-      <span class="gx-hint" id="aiZoneState"></span>
-    </div>
-
-    <div class="mo-section">
-      <label class="mo-switch"><input type="checkbox" id="aiSchedOn" class="mo-sw"><span>Solo en un horario</span></label>
-      <div id="aiSchedBody" class="mo-sched">
-        <div class="mo-days" id="aiDays" role="group" aria-label="Días armados">
-          <button type="button" data-d="1" aria-label="Lunes" aria-pressed="false">L</button>
-          <button type="button" data-d="2" aria-label="Martes" aria-pressed="false">M</button>
-          <button type="button" data-d="3" aria-label="Miércoles" aria-pressed="false">X</button>
-          <button type="button" data-d="4" aria-label="Jueves" aria-pressed="false">J</button>
-          <button type="button" data-d="5" aria-label="Viernes" aria-pressed="false">V</button>
-          <button type="button" data-d="6" aria-label="Sábado" aria-pressed="false">S</button>
-          <button type="button" data-d="0" aria-label="Domingo" aria-pressed="false">D</button>
-        </div>
-        <div class="mo-row">
-          <label class="gx-field">Desde <input type="time" id="aiStart" class="gx-in" value="21:00"></label>
-          <label class="gx-field">Hasta <input type="time" id="aiEnd" class="gx-in" value="06:00"></label>
-        </div>
-        <p class="gx-hint" id="aiSchedHint"></p>
+    <div class="ai-engine" id="aiEngine" data-engine="browser" role="status">
+      <span class="cw-dot ai-engine-dot" aria-hidden="true"></span>
+      <div class="ai-engine-text">
+        <strong id="aiEngineTitle">Comprobando el detector…</strong>
+        <span id="aiEngineText"></span>
       </div>
     </div>
 
-    <!-- Avisos fuera de pantalla: foto por WhatsApp / correo (regla del servidor,
-         funciona aunque nadie tenga el DVR abierto). Admin y seguridad. -->
-    <div class="mo-section" id="aiAlertBox" hidden>
-      <label class="mo-switch"><input type="checkbox" id="alEnabled" class="mo-sw"><span>Avisar con foto por WhatsApp o correo</span></label>
-      <div id="alBody" class="mo-alert">
-        <p class="gx-hint" id="alChannels"></p>
-        <div class="mo-checks">
-          <label class="mo-check"><input type="checkbox" id="alHead"><span>Persona sin casco</span></label>
-          <label class="mo-check"><input type="checkbox" id="alFire"><span>Fuego o humo</span></label>
+    <div class="ai-body">
+
+      <aside class="ai-side">
+        <h3 class="ai-h">Dónde</h3>
+        <div class="ai-zonebox">
+          <img id="aiZoneImg" alt="Vista de la cámara con la zona de detección">
+          <svg id="aiZoneSvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" hidden><polygon id="aiZonePoly" points=""/></svg>
+          <span class="ai-zonetag" id="aiZoneTag">Toda la imagen</span>
         </div>
-        <div class="mo-grid">
-          <label class="gx-field">Confirmar tras
-            <select id="alHits" class="gx-in">
-              <option value="2">2 detecciones (más rápido)</option>
-              <option value="3">3 detecciones</option>
-              <option value="5">5 detecciones (menos falsos)</option>
-            </select>
+        <div class="ai-btnrow">
+          <button class="cw-btn" id="aiZoneBtn" type="button">Editar zona</button>
+          <button class="cw-btn" id="aiZoneAll" type="button">Toda la imagen</button>
+        </div>
+        <p class="ai-note" id="aiZoneState"></p>
+
+        <h3 class="ai-h ai-h2">Cuándo</h3>
+        <div class="cw-seg" role="group" aria-label="Cuándo vigilar" id="aiWhen">
+          <button type="button" data-when="always" aria-pressed="true">Siempre</button>
+          <button type="button" data-when="sched" aria-pressed="false">En un horario</button>
+        </div>
+        <div id="aiSchedBody" class="ai-sched" hidden>
+          <div class="ai-days" id="aiDays" role="group" aria-label="Días armados">
+            <button type="button" data-d="1" aria-label="Lunes" aria-pressed="false">L</button>
+            <button type="button" data-d="2" aria-label="Martes" aria-pressed="false">M</button>
+            <button type="button" data-d="3" aria-label="Miércoles" aria-pressed="false">X</button>
+            <button type="button" data-d="4" aria-label="Jueves" aria-pressed="false">J</button>
+            <button type="button" data-d="5" aria-label="Viernes" aria-pressed="false">V</button>
+            <button type="button" data-d="6" aria-label="Sábado" aria-pressed="false">S</button>
+            <button type="button" data-d="0" aria-label="Domingo" aria-pressed="false">D</button>
+          </div>
+          <div class="ai-times">
+            <label class="gx-field">Desde <input type="time" id="aiStart" class="gx-in" value="21:00"></label>
+            <label class="gx-field">Hasta <input type="time" id="aiEnd" class="gx-in" value="06:00"></label>
+          </div>
+        </div>
+        <p class="ai-note" id="aiSchedHint"></p>
+      </aside>
+
+      <div class="ai-main">
+
+        <section class="ai-sec">
+          <h3 class="ai-h">Qué vigilar <span class="ai-hsub">· puedes elegir varias</span></h3>
+          <div class="ai-targets" id="aiTargets">
+            <label class="ai-target" data-t="persona">
+              <input type="checkbox" class="sr-only" data-target="persona">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Personas</span><span class="ai-thint">Alguien entra en la zona</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+            <label class="ai-target" data-t="vehiculo">
+              <input type="checkbox" class="sr-only" data-target="vehiculo">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Vehículos</span><span class="ai-thint">Auto, camión, bus o moto</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+            <label class="ai-target" data-t="epp">
+              <input type="checkbox" class="sr-only" data-target="epp">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Persona sin casco</span><span class="ai-thint">Cabeza descubierta (EPP)</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+            <label class="ai-target" data-t="fuego">
+              <input type="checkbox" class="sr-only" data-target="fuego">
+              <span class="ai-box" aria-hidden="true"></span>
+              <span class="ai-ttext"><span class="ai-tname">Fuego o humo</span><span class="ai-thint">Llama o columna de humo</span><span class="ai-tblocked" hidden></span></span>
+            </label>
+          </div>
+        </section>
+
+        <section class="ai-sec">
+          <h3 class="ai-h">Sensibilidad</h3>
+          <div class="ai-row">
+            <div class="cw-seg" role="group" aria-label="Sensibilidad" id="aiSens">
+              <button type="button" data-s="60" aria-pressed="false">Baja</button>
+              <button type="button" data-s="40" aria-pressed="true">Media</button>
+              <button type="button" data-s="25" aria-pressed="false">Alta</button>
+            </div>
+            <span class="ai-note" id="aiSensText"></span>
+          </div>
+        </section>
+
+        <section class="ai-sec">
+          <h3 class="ai-h">Al detectar, en pantalla</h3>
+          <div class="ai-row">
+            <div class="cw-seg" role="group" aria-label="Reacción en pantalla" id="aiActions">
+              <button type="button" data-a="full" aria-pressed="false">Pantalla completa</button>
+              <button type="button" data-a="frame" aria-pressed="false">Marco rojo</button>
+              <button type="button" data-a="badge" aria-pressed="false">Aviso discreto</button>
+            </div>
+            <label class="mo-switch ai-sound"><input type="checkbox" id="aiSound" class="mo-sw" role="switch"><span>Sonido de alarma</span></label>
+          </div>
+        </section>
+
+        <!-- Avisos fuera de pantalla: foto por WhatsApp / correo (regla del servidor, funciona
+             aunque nadie tenga el panel abierto). Solo admin y seguridad. -->
+        <section class="ai-sec ai-alert" id="aiAlertBox" hidden>
+          <label class="mo-switch ai-alerthead">
+            <input type="checkbox" id="alEnabled" class="mo-sw" role="switch">
+            <span class="ai-alerttext"><strong>Avisar con foto por WhatsApp o correo</strong><span class="ai-note">Aunque nadie esté mirando la pantalla.</span></span>
           </label>
-          <label class="gx-field">No repetir antes de
-            <select id="alCool" class="gx-in">
-              <option value="60">1 minuto</option>
-              <option value="300">5 minutos</option>
-              <option value="900">15 minutos</option>
-              <option value="1800">30 minutos</option>
-            </select>
-          </label>
-        </div>
-        <div class="mo-zone">
-          <button class="cw-btn cw-btn--sm" id="alTest" type="button">Enviar prueba a los destinatarios</button>
-          <span class="gx-hint" id="alState" role="status"></span>
-        </div>
+          <div id="alBody" class="ai-alertbody">
+            <div class="ai-chips">
+              <span class="ai-chiplabel">Avisa de:</span>
+              <span id="alChips" class="ai-chiplist"></span>
+            </div>
+            <p class="ai-note" id="alChannels"></p>
+            <div class="ai-alertrow">
+              <label class="gx-field">Confirmar tras
+                <select id="alHits" class="gx-in">
+                  <option value="2">2 detecciones · más rápido</option>
+                  <option value="3">3 detecciones</option>
+                  <option value="5">5 detecciones · menos falsos</option>
+                </select>
+              </label>
+              <label class="gx-field">No repetir antes de
+                <select id="alCool" class="gx-in">
+                  <option value="60">1 minuto</option>
+                  <option value="300">5 minutos</option>
+                  <option value="900">15 minutos</option>
+                  <option value="1800">30 minutos</option>
+                </select>
+              </label>
+              <button class="cw-btn" id="alTest" type="button">Enviar prueba</button>
+            </div>
+            <p class="ai-note" id="alState" role="status"></p>
+            <p class="ai-warn" id="alNoRecip" hidden>
+              <svg class="cw-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>
+              <span>Todavía no hay destinatarios. <a href="#" id="alGoSettings">Agregar en Ajustes › Alertas</a></span>
+            </p>
+          </div>
+        </section>
+
       </div>
     </div>
 
-    <div class="mo-foot">
-      <span class="gx-hint" id="aiModelState"></span>
+    <footer class="ai-foot">
+      <span class="ai-footnote" id="aiModelState" role="status"></span>
+      <button class="cw-btn" id="aiCancel" type="button">Cancelar</button>
       <button class="cw-btn cw-btn--primary" id="aiSave" type="button">Guardar</button>
-    </div>
+    </footer>
   </div>
 </div>
 
