@@ -139,7 +139,6 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .camcheck input:focus-visible { outline: none; }
 .filebtn:focus-within { outline: 2px solid var(--cw-focus); outline-offset: 2px; }
 .topbar .tab:focus-visible { outline-offset: -2px; }
-.dvr-btn:focus-visible, .dvr-sel:focus-visible { outline-color: #fff; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -330,10 +329,7 @@ summary:hover { color: var(--text); }
 }
 
 .tile { cursor: default; }
-.tile[draggable="true"] .tilebar { cursor: grab; }
 .tile.dragging { opacity: .4; outline: 2px dashed var(--accent); }
-.draghandle { cursor: grab; color: var(--muted); padding: 0 2px; user-select: none; }
-.draghandle:active { cursor: grabbing; }
 .tile {
   position: relative; background: #000; border: 1px solid var(--line);
   border-radius: var(--radius); overflow: hidden; aspect-ratio: 16 / 9;
@@ -358,35 +354,12 @@ summary:hover { color: var(--text); }
 .tile.zoomed:active video, .tile.zoomed:active img.snap { cursor: grabbing; }
 /* Cámara sin señal: se atenúa el fotograma viejo y se muestra "sin conexión". */
 .tile.snapoff img.snap { opacity: .28; filter: grayscale(1); }
-.tilebar {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px; font-size: 12px;
-  background: linear-gradient(transparent, rgba(0,0,0,.85));
-}
-.tilebar .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tilestate {
   position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 6px;
   color: var(--muted); font-size: 12px; text-align: center; padding: 16px;
 }
 .tilestate.oculto { display: none; }
-.spinner {
-  width: 20px; height: 20px; border: 2px solid var(--line);
-  border-top-color: var(--accent); border-radius: 50%;
-  animation: giro .8s linear infinite;
-}
-@keyframes giro { to { transform: rotate(360deg); } }
-
-/* ---------------------------------------------------------- IA en el mosaico */
-.tilebar .ai {
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.tilebar .ai.on { color: var(--ok); border-color: rgba(61,214,140,.35); }
-.tilebar .ai .dotai {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
-}
-.tilebar .ai.on .dotai { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
 
 /* Teja maximizada dentro de la ventana (alarma automática, sin gesto). */
 .tile.maximized {
@@ -460,12 +433,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 .timerow { display: flex; gap: 14px; }
 .timerow label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
 .timerow input { width: auto; }
-.tile .schedtag {
-  position: absolute; top: 10px; right: 66px; z-index: 5;
-  font-size: 10.5px; padding: 2px 6px; border-radius: 5px;
-  background: rgba(71,85,105,.92); color: #fff; display: none;
-}
-.tile.hassched .schedtag { display: inline-block; }
 
 /* Editor de zona */
 .zonecard { width: auto; max-width: 94vw; }
@@ -475,14 +442,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
   border-radius: 8px; background: #000; cursor: crosshair; touch-action: none;
 }
 .zonebtns { display: flex; gap: 8px; }
-
-/* Marca de zona activa en la teja */
-.tile .zonetag {
-  position: absolute; top: 10px; right: 10px; z-index: 5;
-  font-size: 10.5px; padding: 2px 7px; border-radius: 5px;
-  background: rgba(27,42,68,.95); color: #A9C9FF; display: none;
-}
-.tile.haszone .zonetag { display: inline-block; }
 
 /* ---------------------------------------------------------- ajustes */
 .panel {
@@ -556,11 +515,7 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 .dvr-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; height: 42px;
   background: var(--cw-panel); border-bottom: 1px solid var(--line); color: var(--text); flex: none; }
 .dvr-title { font-weight: 600; font-size: 13px; color: var(--muted); }
-.dvr-sel { background: var(--cw-control); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font: inherit; }
 .dvr-pager { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-.dvr-btn { background: rgba(255,255,255,.1); color: #fff; border: 0; border-radius: 7px; width: 32px; height: 30px; cursor: pointer; font-size: 14px; }
-.dvr-btn:hover { background: rgba(255,255,255,.22); }
-.dvr-sp { flex: 1; }
 /* Mosaico del servidor: UN video 16:9 + etiquetas por celda (porcentaje). */
 .dvr-grid { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; background: #000; }
 .dvr-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; max-height: 100%; background: #000; }
@@ -570,13 +525,9 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 .dvr-pos .dvr-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 7px; font-size: 12px;
   font-weight: 600; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.72)); pointer-events: none;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dvr-pos .dvr-rec { position: absolute; top: 5px; right: 7px; color: var(--cw-live); font-size: 11px; text-shadow: 0 0 4px #000; animation: dvrblink 1.6s infinite; pointer-events: none; }
-@keyframes dvrblink { 50% { opacity: .25; } }
 /* Loader por celda (marca CamWay girando) mientras el mosaico monta */
 .dvr-load { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .dvr-stage:not(.loading) .dvr-load { display: none; }
-.dvr-loadimg { width: 22%; max-width: 72px; min-width: 30px; opacity: .85; animation: dvrspin 1.1s linear infinite; }
-@keyframes dvrspin { to { transform: rotate(360deg); } }
 .dvr-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; pointer-events: none; }
 .dvr-max { position: absolute; left: 0; right: 0; top: 42px; bottom: 0; background: #000; display: none; }
 .dvrview.maxed .dvr-grid { display: none; }
@@ -715,27 +666,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 .ts-item img { width: 72px; height: 40px; object-fit: cover; border-radius: 5px; background: #000; flex-shrink: 0; }
 .ts-item .n { font-size: 13px; }
 
-/* ---------------- controles PTZ ---------------- */
-.ptzpad {
-  position: absolute; left: 10px; top: 10px; z-index: 5;
-  display: grid; grid-template-columns: repeat(3, 30px); grid-template-rows: repeat(3, 30px);
-  gap: 3px; opacity: 0; transition: opacity .15s;
-}
-.tile:hover .ptzpad, .tile.maximized .ptzpad, .tile.live .ptzpad { opacity: .95; }
-.ptzbtn {
-  border: 1px solid var(--line); border-radius: 6px; background: rgba(11,15,20,.78);
-  color: #fff; cursor: pointer; font-size: 13px;
-  display: flex; align-items: center; justify-content: center;
-}
-.ptzbtn:hover { background: var(--accent); }
-.ptzbtn.busy { background: var(--accent-bright); }
-.ptzbtn.up { grid-area: 1 / 2; }
-.ptzbtn.left { grid-area: 2 / 1; }
-.ptzbtn.right { grid-area: 2 / 3; }
-.ptzbtn.down { grid-area: 3 / 2; }
-.ptzbtn.zoomin { grid-area: 1 / 1; font-weight: bold; }
-.ptzbtn.zoomout { grid-area: 1 / 3; font-weight: bold; }
-
 /* ---------------- panel de kiosco / equipo cliente ---------------- */
 .kioskrow { margin: 10px 0; }
 .kioskrow > label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
@@ -810,8 +740,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 .copyfield code { min-width: 0; }
 /* Las barras de botones se parten en vez de desbordar, en cualquier ancho */
 .field.actions { flex-wrap: wrap; }
-.tilebar { flex-wrap: wrap; row-gap: 4px; }
-.tilebar .t { flex: 1 1 60px; }
 .toast { max-width: calc(100vw - 24px); }
 
 /* Táctil: objetivos de al menos ~40 px */
@@ -819,8 +747,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
   button, .topbar .tab, summary { min-height: 40px; }
   button.small { padding: 8px 12px; }
   .days button { width: 40px; height: 40px; }
-  .dvr-btn { width: 40px; height: 34px; }
-  .ptzpad { grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(3, 34px); }
   input[type=checkbox] { width: 20px; height: 20px; }
 }
 
@@ -864,7 +790,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
 
   /* mosaico */
   .zonegrid { grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); padding: 8px; gap: 8px; }
-  .tilebar { padding: 6px 8px; }
 
   /* grabaciones */
   .recbar { margin: 12px 0; padding: 12px; }
@@ -906,7 +831,6 @@ button.primary.danger:hover:not(:disabled) { background: #C9302A; border-color: 
   /* vista DVR */
   .dvr-bar { gap: 6px; padding: 4px 8px; }
   .dvr-title { display: none; }
-  .dvr-sel { max-width: 118px; font-size: 14px; }
   .dvr-pager { gap: 4px; }
   .dvr-hint { display: none; }
 }
