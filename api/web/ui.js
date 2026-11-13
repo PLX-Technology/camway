@@ -166,6 +166,34 @@
     (items[0] || top.el).focus({ preventScroll: true });
   });
 
+  // ---------------------------------------------------------------- cabecera
+  // app.js solo cambia la clase de los puntos de estado (dot on/off) y el texto
+  // de #userName; aquí se traduce a texto accesible y a la inicial del avatar.
+  [["dotApi", "Servidor"], ["dotMtx", "Vídeo"]].forEach(([id, base]) => {
+    const dot = document.getElementById(id);
+    if (!dot) return;
+    const sync = () => {
+      const state = dot.classList.contains("on") ? "en línea"
+        : dot.classList.contains("off") ? "sin conexión" : "comprobando";
+      dot.setAttribute("aria-label", `${base}: ${state}`);
+      dot.title = `${base}: ${state}`;
+    };
+    new MutationObserver(sync).observe(dot, { attributes: true, attributeFilter: ["class"] });
+    sync();
+  });
+  const userName = document.getElementById("userName");
+  const avatar = document.querySelector(".usericon");
+  if (userName && avatar) {
+    const syncUser = () => {
+      const name = userName.textContent.trim();
+      avatar.textContent = name ? Array.from(name)[0] : "";
+      const box = document.getElementById("userBox");
+      if (box) box.title = name ? `Sesión de ${name}` : "";
+    };
+    new MutationObserver(syncUser).observe(userName, { childList: true, characterData: true, subtree: true });
+    syncUser();
+  }
+
   // ---------------------------------------------------------------- pestañas
   // app.js cambia la clase `.active`; aquí se refleja en `aria-selected` y se
   // añade el teclado de un tablist (flechas, Inicio, Fin), sin tocar app.js.
