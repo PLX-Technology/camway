@@ -193,6 +193,8 @@ def build_fixtures() -> dict:
         "credentials": [{"id": 1, "username": "admin", "label": "Hikvision", "password": "x"},
                         {"id": 2, "username": H1, "label": H2, "password": ""}],
         "layout": {"zones": [{"id": "default", "name": "Sin zona", "cams": []}]},
+        # Configs de IA de ejemplo: una con el `target` viejo ("ambos", como estaría
+        # guardada antes de A6) y otra con varios objetivos.
         "ai": {},
         "ptz": {},
         "next_user_id": 5,
@@ -200,6 +202,39 @@ def build_fixtures() -> dict:
         "next_rec_id": 4,
         "mosaic": None,
     }
+
+
+# --- objetivos de la IA (A6): misma lógica que api/app/store.py ---------------
+AI_TARGETS = ("persona", "vehiculo", "epp", "fuego")
+
+
+def normalize_targets(targets=None, target=None) -> list:
+    if isinstance(targets, (list, tuple, set)):
+        found = {t for t in targets if t in AI_TARGETS}
+        if found:
+            return [t for t in AI_TARGETS if t in found]
+    if target == "ambos":
+        return ["persona", "vehiculo"]
+    if target in AI_TARGETS:
+        return [target]
+    return ["vehiculo"]
+
+
+def legacy_target(targets: list) -> str:
+    if len(targets) == 1:
+        return targets[0]
+    if {"persona", "vehiculo"} <= set(targets):
+        return "ambos"
+    return targets[0] if targets else "vehiculo"
+
+
+def ai_cfg(sid: str, body: dict, user_id: int = 1) -> dict:
+    targets = normalize_targets(body.get("targets"), body.get("target"))
+    return {"user_id": user_id, "stream_id": sid, "enabled": bool(body.get("enabled")),
+            "target": legacy_target(targets), "targets": targets,
+            "min_score": float(body.get("min_score", 0.4)),
+            "action": body.get("action", "full"),
+            "zone": body.get("zone") or None, "schedule": body.get("schedule") or None}
 
 
 DEFAULT_RULE = {"enabled": False, "classes": ["head"], "min_score": 0.5,
@@ -214,6 +249,13 @@ ARGS = None            # argparse.Namespace
 DATA = build_fixtures()
 SESSION = {"user": None}      # usuario con sesión (dict) o None
 ADMIN_USER = DATA["users"][0]
+
+
+def seed_ai():
+    nvr, host = DATA["devices"][0], DATA["devices"][1]
+    DATA["ai"][nvr["streams"][0]["id"]] = ai_cfg(nvr["streams"][0]["id"], {"target": "ambos", "enabled": False})
+    DATA["ai"][host["streams"][0]["id"]] = ai_cfg(
+        host["streams"][0]["id"], {"targets": ["epp", "fuego"], "enabled": True, "min_score": 0.5})
 
 
 def role_user(role: str):
@@ -523,7 +565,7 @@ class Handler(BaseHTTPRequestHandler):
     def gate(self, path: str, method: str):
         if path in PUBLIC_EXACT:
             return SESSION["user"]
-        if path.startswith("/api/detector") or path.startswith("/bi/"):
+        if (path.startswith("/api/detector") and path != "/api/detector/status")                 or path.startswith("/bi/"):
             return None                       # interno (el mock solo recibe localhost)
         user = SESSION["user"]
         if not user and ARGS.role == "kiosk" and not is_admin_path(path, method):
@@ -782,17 +824,13 @@ class Handler(BaseHTTPRequestHandler):
             if what == "ai":
                 if method == "GET":
                     return self.json(d["ai"].get(sid) or {
-                        "enabled": False, "target": "vehiculo", "min_score": 0.4,
-                        "action": "full", "zone": None, "schedule": None})
+                        "enabled": False, "target": "vehiculo", "targets": ["vehiculo"],
+                        "min_score": 0.4, "action": "full", "zone": None, "schedule": None})
                 if method == "PUT":
                     b = self.body_json()
-                    d["ai"][sid] = {"user_id": user["id"], "stream_id": sid,
-                                    "enabled": bool(b.get("enabled")),
-                                    "target": b.get("target", "vehiculo"),
-                                    "min_score": float(b.get("min_score", 0.4)),
-                                    "action": b.get("action", "full"),
-                                    "zone": b.get("zone") or None,
-                                    "schedule": b.get("schedule") or None}
+                    if "targets" in b and not isinstance(b["targets"], list):
+                        raise ApiError(400, "'targets' debe ser una lista")
+                    d["ai"][sid] = ai_cfg(sid, b, user["id"])
                     return self.json({"ok": True})
             if what == "ptz" and method == "GET":
                 return self.json({"ok": True})
@@ -841,8 +879,33 @@ class Handler(BaseHTTPRequestHandler):
         # ---- detecciones
         if path == "/api/detections" and method == "GET":
             return self._sse_detections()
+        if path == "/api/detector/status" and method == "GET":
+            # A7: como main.py. --detector on|off decide `online`; --detector-models,
+            # qué modelos declara (general/epp/fuego).
+            on = ARGS.detector == "on"
+            have = set(ARGS.detector_models.split(",")) if on else set()
+            return self.json({
+                "online": on, "last_seen": (time.time() - 2) if on else (time.time() - 600),
+                "models": {"general": "general" in have, "epp": "epp" in have,
+                           "fuego": "fuego" in have}})
         if path == "/api/detector/targets" and method == "GET":
-            return self.json({"targets": []})
+            # Como main.py: unión de los `targets` de las configs de IA activas, más
+            # lo que piden las reglas de aviso (head → epp, fuego/humo → fuego).
+            union: dict = {}
+            for sid, c in d["ai"].items():
+                if c["enabled"]:
+                    union.setdefault(sid, set()).update(c["targets"])
+            for sid, r in d["alert_rules"].items():
+                if r.get("enabled"):
+                    t = union.setdefault(sid, set())
+                    if "head" in r.get("classes", []):
+                        t.add("epp")
+                    if {"fuego", "humo"} & set(r.get("classes", [])):
+                        t.add("fuego")
+            return self.json({"targets": [
+                {"stream_id": sid, "url": f"rtsp://mediamtx:8554/{sid}",
+                 "targets": [x for x in AI_TARGETS if x in t], "ai": True, "record_motion": False}
+                for sid, t in union.items()]})
         if path == "/api/detector/events" and method == "POST":
             self.body_raw()
             return self.json({"ok": True})
@@ -1280,6 +1343,9 @@ def main(argv=None) -> int:
                     help="modo por defecto del mosaico (frames = fotogramas fijos, sin WHEP)")
     ap.add_argument("--detector", choices=("on", "off"), default="on",
                     help="on: /api/health dice detector=true (el panel usa SSE y no carga el modelo)")
+    ap.add_argument("--detector-models", default="general,epp",
+                    help="modelos que declara el detector en /api/detector/status "
+                         "(general,epp,fuego; por defecto sin fuego para probar ese caso)")
     ap.add_argument("--no-detections", action="store_true",
                     help="no emitir detecciones falsas cada 8 s por /api/detections")
     ap.add_argument("--verbose", action="store_true", help="registrar cada petición")
@@ -1290,6 +1356,7 @@ def main(argv=None) -> int:
         return 2
     mimetypes.add_type("image/svg+xml", ".svg")
     SESSION["user"] = role_user(ARGS.role)
+    seed_ai()
     if not ARGS.no_detections:
         threading.Thread(target=detection_ticker, daemon=True).start()
     httpd = Server(("127.0.0.1", ARGS.port), Handler)
