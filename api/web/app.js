@@ -690,7 +690,11 @@ function paintWallToggle() {
 function setWallPaused(p) {
   wallUserPaused = p;
   paintWallToggle();
+  paintAllTiles();                 // la insignia pasa a «Pausado» / vuelve
 }
+
+// Pie de estado del Mosaico (se completa en B14).
+function updateWallFooter() {}
 
 function startWallFeeds() {
   if (liveMosaic) startLiveMosaic();
@@ -856,47 +860,70 @@ function startLiveMosaic() {
 }
 
 // ---- teja del mosaico: se arma en piezas con nombre (HTML, reproductor, audio,
-// hablar, estado, ampliar, arrastre, botones de admin, PTZ). makeTile las une.
+// hablar, estado, ampliar, arrastre, botones de admin, PTZ, menú). makeTile las une.
+
+// Estados visibles de una teja (insignia + panel central). Los textos son fijos:
+// nada de la API entra en ellos.
+const TILE_STATUS = {
+  live: "En vivo", connecting: "Conectando", auth: "Pide clave",
+  offline: "Sin señal", paused: "Pausado",
+};
+const SVG_MINUS = '<svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M5 12h14"/></svg>';
 
 // HTML interno de una teja. Todo dato de la API va por esc() (los nombres y los
 // banners los escribe cualquier equipo de la LAN).
 function tileHtml(tile) {
   const admin = isAdmin();
+  const name = esc(tile.title);
+  const sub = esc([tile.host, tile.vendor].filter(Boolean).join(" · "));
   return `
     <img class="snap" alt="">
     <video playsinline muted></video>
     <canvas class="detoverlay"></canvas>
-    <div class="aialert"><span data-alert-txt>Detección</span></div>
-    <div class="zonetag">▣ zona</div>
-    <div class="schedtag">⏰ horario</div>
-    <div class="tilestate"><div class="spinner"></div><span>en espera</span></div>
-    <div class="ptzpad" hidden>
-      <button class="ptzbtn up" data-ptz="up" title="Arriba" aria-label="Mover cámara arriba">▲</button>
-      <button class="ptzbtn left" data-ptz="left" title="Izquierda" aria-label="Mover cámara a la izquierda">◀</button>
-      <button class="ptzbtn right" data-ptz="right" title="Derecha" aria-label="Mover cámara a la derecha">▶</button>
-      <button class="ptzbtn down" data-ptz="down" title="Abajo" aria-label="Mover cámara abajo">▼</button>
-      ${tile.zoom ? `<button class="ptzbtn zoomin" data-ptz="zoomin" title="Acercar (zoom +)" aria-label="Acercar (zoom óptico)">＋</button>
-      <button class="ptzbtn zoomout" data-ptz="zoomout" title="Alejar (zoom −)" aria-label="Alejar (zoom óptico)">－</button>` : ""}
+    <div class="cw-tilestate" hidden></div>
+    <div class="cw-tile__top">
+      <div class="cw-tile__id">
+        <button type="button" class="cw-tile__name" data-select title="Seleccionar ${name}">${name}</button>
+        <div class="cw-tile__sub">${sub}</div>
+      </div>
+      <span class="cw-tag cw-tag--zone" title="Zona de detección activa" aria-label="Zona de detección activa">${icon("layers", 13)}</span>
+      <span class="cw-tag cw-tag--sched" title="IA con horario" aria-label="IA con horario">${icon("calendar", 13)}</span>
+      <span class="cw-badge cw-badge--connecting" data-badge>${TILE_STATUS.connecting}</span>
     </div>
-    <div class="tilebar">
-      <span class="draghandle" title="Arrastrar" aria-hidden="true">⠿</span>
-      <span class="t">${esc(tile.title)}</span>
-      <span class="chip">${esc(tile.codec)}</span>
-      ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio" aria-label="Oír el audio de la cámara" aria-pressed="false">🔇</button>` : ""}
-      ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)" aria-label="Hablar por el altavoz de la cámara (mantén pulsado)">🎙️</button>` : ""}
-      ${admin ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local" aria-label="Grabación local de la cámara">⏺</button>` : ""}
-      ${admin ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)" aria-label="Optimizar para tiempo real">⚡</button>` : ""}
-      ${admin ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}" aria-label="Activar o desactivar el PTZ">🕹</button>` : ""}
-      <button class="ghost small ai" data-ai title="Comportamiento IA" aria-label="Comportamiento IA de la cámara"><span class="dotai"></span>IA</button>
-      <button class="ghost small" data-play>Ver</button>
+    <div class="aialert">${icon("sparkles", 13)}<span data-alert-txt>Detección</span></div>
+    <div class="cw-ptz" hidden>
+      <button class="cw-ptz__btn up" data-ptz="up" title="Arriba" aria-label="Mover cámara arriba">${icon("chevronDown", 18)}</button>
+      <button class="cw-ptz__btn left" data-ptz="left" title="Izquierda" aria-label="Mover cámara a la izquierda">${icon("chevronLeft", 18)}</button>
+      <button class="cw-ptz__btn right" data-ptz="right" title="Derecha" aria-label="Mover cámara a la derecha">${icon("chevronRight", 18)}</button>
+      <button class="cw-ptz__btn down" data-ptz="down" title="Abajo" aria-label="Mover cámara abajo">${icon("chevronDown", 18)}</button>
+      ${tile.zoom ? `<button class="cw-ptz__btn zoomin" data-ptz="zoomin" title="Acercar (zoom óptico)" aria-label="Acercar (zoom óptico)">${icon("plus", 16)}</button>
+      <button class="cw-ptz__btn zoomout" data-ptz="zoomout" title="Alejar (zoom óptico)" aria-label="Alejar (zoom óptico)">${SVG_MINUS}</button>` : ""}
+    </div>
+    <div class="cw-ctl">
+      <span class="cw-tile__codec">${esc(tile.codec)}</span>
+      <button class="cw-ib cw-ib--glass" type="button" data-enlarge aria-label="Ampliar ${name}" title="Ampliar (doble clic o Intro)"><span class="ico-max">${icon("maximize", 16)}</span><span class="ico-min">${icon("minimize", 16)}</span></button>
+      <button class="cw-ib cw-ib--glass" type="button" data-ptzopen aria-pressed="false" aria-label="Mover cámara (PTZ) de ${name}" title="Mover cámara (PTZ)" hidden>${icon("ptz", 16)}</button>
+      ${tile.audio ? `<button class="cw-ib cw-ib--glass" type="button" data-mute aria-pressed="false" aria-label="Oír el audio de ${name}" title="Oír audio">${icon("volumeOff", 16)}</button>` : ""}
+      ${tile.talk ? `<button class="cw-ib cw-ib--glass" type="button" data-talk aria-label="Hablar por ${name} (mantén pulsado)" title="Hablar (mantén pulsado)">${icon("mic", 16)}</button>` : ""}
+      ${admin ? `<button class="cw-ib cw-ib--glass rec${tile.rec ? " recon" : ""}" type="button" data-rec aria-label="Grabar en este equipo ${name}" title="Grabación local">${icon("record", 16)}</button>` : ""}
+      <button class="cw-ib cw-ib--glass ai" type="button" data-ai aria-label="Detección por IA de ${name}" title="Detección por IA">${icon("sparkles", 14)}<span>IA</span></button>
+      <div class="cw-menuwrap">
+        <button class="cw-ib cw-ib--glass" type="button" data-more aria-haspopup="menu" aria-expanded="false" aria-label="Más acciones de ${name}" title="Más acciones">${icon("more", 16)}</button>
+        <div class="cw-menu cw-menu--up" role="menu" aria-label="Más acciones de ${name}" hidden>
+          <button class="cw-menu__item" type="button" role="menuitem" data-play>${icon("play", 16)}<span class="cw-menu__lbl">Ver en vivo</span></button>
+          ${admin ? `<button class="cw-menu__item" type="button" role="menuitem" data-optimize>${icon("zap", 16)}<span class="cw-menu__lbl">Optimizar tiempo real</span></button>
+          <button class="cw-menu__item" type="button" role="menuitem" data-ptzcfg>${icon("ptz", 16)}<span class="cw-menu__lbl">Activar PTZ (ONVIF)</span></button>` : ""}
+        </div>
+      </div>
     </div>`;
 }
 
-// Elemento de la teja: enfocable con Tab, Enter la amplía/restaura (igual que el
+// Elemento de la teja: enfocable con Tab, Intro la amplía/restaura (igual que el
 // doble clic) y Escape restaura una ampliada dentro de la página.
 function createTileElement(tile) {
   const el = document.createElement("div");
-  el.className = "tile";
+  el.className = "tile cw-tile";
   el.dataset.streamId = tile.stream_id;
   el.draggable = true;
   el.tabIndex = 0;
@@ -914,10 +941,10 @@ function createTilePlayer(tile, video) {
   return player;
 }
 
-// Audio: el <video> arranca muteado (política de autoplay). Al pulsar 🔇/🔊
-// —gesto de usuario— se desmutea y suena el audio de la cámara (solo las
-// que publican G.711/PCMA; las AAC no traen este botón). Solo una cámara
-// con sonido a la vez para no mezclar varias.
+// Audio: el <video> arranca muteado (política de autoplay). Al pulsar —gesto de
+// usuario— se desmutea y suena el audio de la cámara (solo las que publican
+// G.711/PCMA; las AAC no traen este botón). Solo una cámara con sonido a la vez
+// para no mezclar varias.
 function wireTileAudio(el, tile, video, player) {
   const muteBtn = el.querySelector("[data-mute]");
   if (!muteBtn) return;
@@ -929,18 +956,18 @@ function wireTileAudio(el, tile, video, player) {
         if (sid !== tile.stream_id && p.video) { p.video.muted = true; }
       });
       document.querySelectorAll("[data-mute]").forEach((b) => {
-        b.textContent = "🔇"; b.setAttribute("aria-pressed", "false");
+        b.innerHTML = icon("volumeOff", 16); b.setAttribute("aria-pressed", "false");
       });
       if (!player.active) { const c = state.tiles.get(tile.stream_id); if (c) goLive(c); }
     }
     video.muted = !on;
     video.volume = 1;
-    muteBtn.textContent = on ? "🔊" : "🔇";
+    muteBtn.innerHTML = icon(on ? "volume" : "volumeOff", 16);
     muteBtn.setAttribute("aria-pressed", on ? "true" : "false");
   });
 }
 
-// Push-to-talk: mantener pulsado 🎙️ habla por el altavoz de la cámara.
+// Push-to-talk: mantener pulsado el micrófono habla por el altavoz de la cámara.
 function wireTileTalk(el, tile) {
   const talkBtn = el.querySelector("[data-talk]");
   if (!talkBtn) return;
@@ -956,41 +983,84 @@ function wireTileTalk(el, tile) {
   talkBtn.addEventListener("click", (ev) => ev.stopPropagation());
 }
 
-// Texto y nombre accesible del botón Ver/Parar según si el vídeo está activo.
-function refreshPlayBtn(el, title, player) {
-  const btn = el.querySelector("[data-play]");
-  if (!btn) return;
-  btn.textContent = player.active ? "Parar" : "Ver";
-  btn.setAttribute("aria-label", `${player.active ? "Parar el vídeo de" : "Ver en vivo"} ${title}`);
+// ---- estado de la teja: insignia + panel central ----
+// Deriva el estado de lo que se sabe: pide clave (si la API lo marca), pausado,
+// y conectando / en vivo / sin señal según el vídeo WebRTC o los fotogramas.
+function tileStatus(c) {
+  if (c.authError) return "auth";
+  if (wallUserPaused) return "paused";
+  if (c.live) {
+    if (c.videoReady || c.conn === "live") return "live";
+    return c.conn === "offline" ? "offline" : "connecting";
+  }
+  if ((c.snapFails || 0) >= SNAP_FAILS_OFFLINE) return "offline";
+  return c.gotFrame ? "live" : "connecting";
 }
 
-// Estado de conexión sobre la teja y botón Ver/Parar.
+function tileStatePanel(st, c) {
+  if (st === "connecting") return `${icon("refresh", 28)}<span>Conectando…</span>`;
+  if (st === "offline") return `${icon("noSignal", 28)}<span>Sin señal · reintentando</span>`;
+  if (st === "auth") {
+    return `${icon("lock", 28)}<span>La cámara pide usuario y clave</span>` +
+      (isAdmin() ? '<button type="button" class="cw-btn cw-btn--sm" data-enter-pass>Ingresar clave</button>' : "");
+  }
+  return "";
+}
+
+function paintTileStatus(c) {
+  const st = tileStatus(c);
+  if (c.status === st) return;
+  c.status = st;
+  const el = c.el;
+  el.dataset.status = st;
+  el.classList.toggle("snapoff", st === "offline");
+  const badge = el.querySelector("[data-badge]");
+  if (badge) {
+    badge.className = `cw-badge cw-badge--${st}`;
+    badge.textContent = TILE_STATUS[st];
+  }
+  const panel = el.querySelector(".cw-tilestate");
+  if (panel) {
+    const html = tileStatePanel(st, c);
+    panel.innerHTML = html;
+    panel.hidden = !html;
+    panel.dataset.status = st;
+  }
+  updateWallFooter();
+}
+
+function paintAllTiles() { state.tiles.forEach(paintTileStatus); }
+
+// Texto y nombre accesible del elemento Ver/Parar del menú de la teja.
+function refreshPlayBtn(el, title, player) {
+  const it = el.querySelector("[data-play]");
+  if (!it) return;
+  it.querySelector(".cw-menu__lbl").textContent = player.active ? "Parar el vídeo" : "Ver en vivo";
+  it.firstElementChild.outerHTML = icon(player.active ? "pause" : "play", 16);
+}
+
+// Estado de conexión sobre la teja y elemento Ver/Parar.
 function wireTileState(el, tile, player) {
-  const stateEl = el.querySelector(".tilestate");
-  const label = stateEl.querySelector("span");
-  const btn = el.querySelector("[data-play]");
-  const setState = (text) => {
-    const live = text === "en vivo";
-    stateEl.classList.toggle("oculto", live);
-    if (!live) {
-      label.textContent = text;
-      const trabajando = text === "conectando" || text.startsWith("reconectando");
-      stateEl.querySelector(".spinner").style.display = trabajando ? "" : "none";
-    }
-    refreshPlayBtn(el, tile.title, player);
+  player.onState = (st) => {
+    const c = state.tiles.get(tile.stream_id);
+    if (!c) return;
+    c.conn = st;
+    paintTileStatus(c);
   };
-  player.onState = (st, n) => setState(whepStateText(st, n));
   state.players.set(tile.stream_id, player);
 
-  btn.addEventListener("click", () => {
+  el.querySelector("[data-play]").addEventListener("click", () => {
     const c = state.tiles.get(tile.stream_id);
     if (!c) return;
     if (c.live) goSnap(c); else goLive(c);
   });
-  stateEl.classList.add("oculto");   // en fotograma no hay spinner de conexión
+  // «Ingresar clave» (cámara que pide usuario y clave): lleva a la pestaña Cámaras.
+  el.querySelector(".cw-tilestate").addEventListener("click", (e) => {
+    if (e.target.closest("[data-enter-pass]")) $('.tab[data-view="inventario"]')?.click();
+  });
 }
 
-// Ampliar/restaurar: doble clic, Enter o Escape.
+// Ampliar/restaurar (botón, doble clic, Intro o Escape) y selección de la teja.
 function wireTileEnlarge(el, tile) {
   const toggleEnlarge = () => {
     const c = state.tiles.get(tile.stream_id);
@@ -1006,11 +1076,17 @@ function wireTileEnlarge(el, tile) {
       toggleFullscreen(el);    // vista normal: pantalla completa del SO
     }
   };
+  el.querySelector("[data-enlarge]").addEventListener("click", (e) => { e.stopPropagation(); toggleEnlarge(); });
   el.addEventListener("dblclick", toggleEnlarge);
   el.addEventListener("keydown", (e) => {
-    if (e.target !== el) return;               // Enter sobre un botón hace su propia acción
+    if (e.target !== el) return;               // Intro sobre un botón hace su propia acción
     if (e.key === "Enter") { e.preventDefault(); toggleEnlarge(); }
     else if (e.key === "Escape" && el.classList.contains("maximized")) { e.preventDefault(); toggleEnlarge(); }
+  });
+  // Seleccionar: clic en la teja o en su nombre (borde azul; la del modo «1»).
+  el.addEventListener("click", (e) => {
+    if (e.target.closest("button:not([data-select]), a, .cw-menu, .cw-ptz")) return;
+    selectTile(tile.stream_id);
   });
 }
 
@@ -1050,6 +1126,10 @@ function createTileCtrl(tile, el, video, player) {
     config: loadAiConfig(tile.stream_id),
     live: false,          // false = mosaico por fotograma; true = vídeo WebRTC
     videoReady: false,    // el vídeo ya tiene su primer frame (oculta el fotograma)
+    conn: "connecting",   // último estado del reproductor WebRTC
+    gotFrame: false,      // ya llegó algún fotograma (modo fotogramas)
+    authError: !!tile.auth_error,   // la API marca «pide usuario y clave» (si lo informa)
+    status: null,         // estado visible actual (ver tileStatus)
     alarmed: false,
     lastHit: 0,
     autoMaxed: false,
@@ -1059,7 +1139,7 @@ function createTileCtrl(tile, el, video, player) {
   };
 }
 
-// Botones de la barra solo para admin: grabación local y optimizar tiempo real.
+// Botones solo para admin: grabación local y optimizar tiempo real.
 function wireTileAdminButtons(el, tile) {
   const recBtn = el.querySelector("[data-rec]");
   if (recBtn) recBtn.addEventListener("click", (ev) => {
@@ -1068,8 +1148,7 @@ function wireTileAdminButtons(el, tile) {
   });
 
   const optBtn = el.querySelector("[data-optimize]");
-  if (optBtn) optBtn.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
+  if (optBtn) optBtn.addEventListener("click", async () => {
     optBtn.classList.add("busy");
     try {
       const r = await api(`/api/streams/${tile.stream_id}/optimize`, { method: "POST", timeout: 0 });
@@ -1083,22 +1162,33 @@ function wireTileAdminButtons(el, tile) {
   });
 }
 
-// PTZ: botón de admin para activar/desactivar (se aplica en sitio, sin rehacer
-// el muro) y flechas visibles solo si la cámara tiene PTZ activado.
+// PTZ. Admin: «Activar/Desactivar PTZ» en el menú «Más» de la teja (se aplica en
+// sitio, sin rehacer el muro). El botón PTZ de los controles y las flechas solo
+// existen si la cámara tiene PTZ activado; las flechas se abren con ese botón.
 function wireTilePtz(el, tile) {
-  const pad = el.querySelector(".ptzpad");
-  const cfgBtn = el.querySelector("[data-ptzcfg]");
+  const pad = el.querySelector(".cw-ptz");
+  const openBtn = el.querySelector("[data-ptzopen]");
+  const cfgItem = el.querySelector("[data-ptzcfg]");
   const paintPtz = () => {
-    pad.hidden = !tile.ptz;
-    if (!cfgBtn) return;
-    cfgBtn.classList.toggle("ptzon", !!tile.ptz);
-    cfgBtn.title = tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)";
+    openBtn.hidden = !tile.ptz;
+    if (!tile.ptz) { openBtn.setAttribute("aria-pressed", "false"); el.classList.remove("ptz-open"); }
+    pad.hidden = !(tile.ptz && el.classList.contains("ptz-open"));
+    if (cfgItem) {
+      cfgItem.querySelector(".cw-menu__lbl").textContent = tile.ptz ? "Desactivar PTZ (ONVIF)" : "Activar PTZ (ONVIF)";
+      cfgItem.classList.toggle("ptzon", !!tile.ptz);
+    }
   };
-  if (cfgBtn) cfgBtn.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
+  openBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !el.classList.contains("ptz-open");
+    el.classList.toggle("ptz-open", open);
+    openBtn.setAttribute("aria-pressed", String(open));
+    paintPtz();
+  });
+  if (cfgItem) cfgItem.addEventListener("click", async () => {
     const enabling = !tile.ptz;
     if (!enabling && !(await uiConfirm(`¿Desactivar el PTZ de "${tile.title}"?`, { okLabel: "Desactivar", danger: true }))) return;
-    cfgBtn.classList.add("busy");
+    cfgItem.classList.add("busy");
     try {
       await api(`/api/devices/${tile.device_id}/ptz-config`, {
         method: "PUT", body: JSON.stringify({ enabled: enabling }) });
@@ -1109,7 +1199,7 @@ function wireTilePtz(el, tile) {
     } catch (e) {
       toast("PTZ: " + e.message, true);
     } finally {
-      cfgBtn.classList.remove("busy");
+      cfgItem.classList.remove("busy");
     }
   });
 
@@ -1130,7 +1220,7 @@ function wireTilePtz(el, tile) {
     });
   });
   el.addEventListener("dblclick", (e) => {   // no maximizar al usar el pad
-    if (e.target.closest(".ptzpad")) e.stopPropagation();
+    if (e.target.closest(".cw-ptz")) e.stopPropagation();
   }, true);
 }
 
@@ -1154,11 +1244,13 @@ function makeTile(tile) {
 
   wireTileAdminButtons(el, tile);
   wireTilePtz(el, tile);
+  wireMenu(el.querySelector("[data-more]"), el.querySelector(".cw-menu"));
 
   setupZoom(ctrl);
   observeTileVisibility(ctrl);
   state.tiles.set(tile.stream_id, ctrl);
   if (ctrl.config.enabled) aiEngine.register(ctrl);
+  paintTileStatus(ctrl);
   return { el, ctrl };
 }
 
@@ -2194,8 +2286,10 @@ function goLive(ctrl) {
   ctrl.live = true;
   ctrl.videoReady = false;
   ctrl.el.classList.add("live");
+  ctrl.conn = "connecting";
   ctrl.player.start();
   refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
+  paintTileStatus(ctrl);
   waitVideoFrame(ctrl);
 }
 
@@ -2207,6 +2301,7 @@ function waitVideoFrame(ctrl) {
     if (!ctrl.live || ctrl.videoReady) return;
     ctrl.videoReady = true;
     ctrl.el.classList.add("videoready");
+    paintTileStatus(ctrl);
   };
   // Sondeo del primer frame REAL pintado (fiable en cualquier navegador y no se
   // pierde al cambiar el srcObject, cosa que sí le pasa a requestVideoFrameCallback).
@@ -2241,7 +2336,7 @@ function dropLive(ctrl) {
   ctrl.el.classList.remove("live", "videoready");
   ctrl.player.stop();
   refreshPlayBtn(ctrl.el, ctrl.title, ctrl.player);
-  ctrl.el.querySelector(".tilestate")?.classList.add("oculto");
+  paintTileStatus(ctrl);
 }
 
 // ---------------- refresco del mosaico por fotogramas ----------------
@@ -2304,12 +2399,12 @@ function bumpSnap(ctrl) {
     if (ok) {
       img.src = next.src;
       qLatSum += performance.now() - t0; qLatN++;
-      ctrl.snapFails = 0; setSnapOffline(ctrl, false);
+      ctrl.snapFails = 0; ctrl.gotFrame = true; paintTileStatus(ctrl);
     } else {
       ctrl.snapFails = (ctrl.snapFails || 0) + 1;
       // El servidor da 503 cuando la cámara lleva >30s sin fotograma nuevo
       // (ver STALE_HIDE en wallcache). Tras unos fallos → "sin conexión".
-      if (ctrl.snapFails >= SNAP_FAILS_OFFLINE) setSnapOffline(ctrl, true);
+      paintTileStatus(ctrl);        // tras SNAP_FAILS_OFFLINE fallos pasa a «Sin señal»
     }
   };
   // Sin respuesta a tiempo: se cancela la carga y cuenta como fallo.
@@ -2418,22 +2513,6 @@ function reconcileAutoLive() {
     _lastVQ.delete(sid);
   });
   autoLiveSet = want;
-}
-
-// Muestra "sin conexión" y atenúa el fotograma viejo cuando el muro deja de
-// recibir imagen de una cámara (colgada/apagada). En vivo lo maneja el player.
-function setSnapOffline(ctrl, off) {
-  const st = ctrl.el.querySelector(".tilestate");
-  if (!st) return;
-  if (off && !ctrl.live && !ctrl.videoReady) {
-    st.classList.remove("oculto");
-    const sp = st.querySelector(".spinner"); if (sp) sp.style.display = "none";
-    const txt = st.querySelector("span"); if (txt) txt.textContent = "sin conexión";
-    ctrl.el.classList.add("snapoff");
-  } else {
-    st.classList.add("oculto");
-    ctrl.el.classList.remove("snapoff");
-  }
 }
 
 // Refresco ROTATIVO: cada ciclo empieza por una teja distinta, así ninguna
@@ -2604,8 +2683,10 @@ function drawDetections(ctrl, preds, wanted, zone, usaZona, vw, vh) {
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, cw, ch);
 
-  // El video va con object-fit:contain; se calcula el rectángulo real.
-  const scale = Math.min(cw / vw, ch / vh);
+  // El vídeo va con object-fit cover (rejilla) o contain (ampliada): se calcula el
+  // rectángulo real según el que tenga ahora.
+  const cover = getComputedStyle(ctrl.video).objectFit === "cover";
+  const scale = cover ? Math.max(cw / vw, ch / vh) : Math.min(cw / vw, ch / vh);
   const dw = vw * scale, dh = vh * scale;
   const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
 
