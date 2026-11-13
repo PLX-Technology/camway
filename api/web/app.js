@@ -839,16 +839,39 @@ async function enterWallView() {
 }
 window.CamWayWall = { sync: syncWall };   // lo usa dvr.js al abrir/cerrar
 
+// Mensaje dentro del muro (cargando / error) en lugar de «No hay streams
+// publicados», que solo es verdad cuando la API contestó con 0 cámaras.
+function showWallMessage(html) {
+  const wall = $("#wall");
+  wall.classList.remove("fit");
+  wall.innerHTML = `<p class="empty" role="status">${html}</p>`;
+  return wall.firstElementChild;
+}
+
+function showWallError(err) {
+  const p = showWallMessage(`No se pudo cargar el muro: ${esc(err && err.message || err)} `
+    + `<button class="ghost" data-wall-retry>Reintentar</button>`);
+  p.setAttribute("role", "alert");
+  p.querySelector("[data-wall-retry]").addEventListener("click", () => loadWall());
+}
+
 async function loadWall() {
   const gen = ++wallGen;
-  wallUserPaused = false;           // recargar reanuda, como siempre
+  const hadWall = state.tiles.size > 0;
+  $("#emptyWall").hidden = true;    // mientras carga no se afirma «no hay cámaras»
+  if (!hadWall) showWallMessage("Cargando cámaras…");
   let data;
   try {
     data = await api("/api/wall");
   } catch (err) {
-    return toast(err.message, true);
+    if (gen !== wallGen) return;
+    // Con un muro ya montado se conserva y se avisa; sin muro, mensaje con reintento.
+    if (hadWall) toast("No se pudo recargar el muro: " + err.message, true);
+    else showWallError(err);
+    return;
   }
   if (gen !== wallGen) return;      // otra carga más reciente tomó el relevo
+  wallUserPaused = false;           // recargar reanuda, como siempre
 
   // Traer la disposición del usuario desde el servidor la primera vez (persiste
   // entre equipos). Luego saveLayout mantiene la caché al día.
@@ -3848,6 +3871,8 @@ function enterZoneKioskChrome() {
 }
 
 (async function init() {
+  const vacio = $("#emptyWall");
+  if (vacio) vacio.hidden = true;     // no parpadear «sin streams» antes de cargar
   if (!(await checkAuth())) return;   // muestra login/setup y se detiene
   $("#authOverlay").hidden = true;
   if (ZONE_ONLY) enterZoneKioskChrome();
