@@ -3652,11 +3652,12 @@ function camLabel(dev) {
   return dev.name || `${dev.host}${dev.vendor && dev.vendor !== "desconocido" ? " · " + dev.vendor : ""}`;
 }
 
+// Lista de cámaras para asignar a un usuario. Se vuelve a pedir cada vez que
+// se abre el selector (una cámara nueva aparece sin recargar la página); si la
+// petición falla se usa la última lista conocida.
 async function deviceList() {
-  if (!state.allDevices) {
-    try { state.allDevices = (await api("/api/devices")).devices; }
-    catch (_) { state.allDevices = []; }
-  }
+  try { state.allDevices = (await api("/api/devices")).devices; }
+  catch (_) { state.allDevices = state.allDevices || []; }
   return state.allDevices;
 }
 
@@ -3721,22 +3722,31 @@ function userRow(u) {
 
   const editBtn = li.querySelector("[data-edit]");
   if (editBtn) editBtn.addEventListener("click", async () => {
-    if (li.querySelector(".rowedit")) { li.querySelector(".rowedit").remove(); return; }
+    // Un solo contenedor (lista + botón Guardar): plegar lo quita entero y
+    // desplegar de nuevo no acumula botones.
+    const open = li.querySelector(".rowedit");
+    if (open) { open.remove(); return; }
+    if (editBtn.disabled) return;           // ya se está abriendo
+    editBtn.disabled = true;
+    const wrap = document.createElement("div");
+    wrap.className = "rowedit";
+    wrap.style.flexBasis = "100%";
     const box = document.createElement("div");
-    box.className = "rowedit camchecks";
-    box.style.flexBasis = "100%";
-    li.appendChild(box);
-    await buildCamChecks(box, u.cameras);
+    box.className = "camchecks";
     const save = document.createElement("button");
     save.className = "primary small"; save.textContent = "Guardar cámaras";
-    save.style.flexBasis = "100%"; save.style.marginTop = "6px";
-    li.appendChild(save);
+    save.style.marginTop = "6px";
+    wrap.append(box, save);
+    try { await buildCamChecks(box, u.cameras); }
+    finally { editBtn.disabled = false; }
+    li.appendChild(wrap);
     save.addEventListener("click", async () => {
+      save.disabled = true;
       try {
         await api(`/api/users/${u.id}`, { method: "PUT",
           body: JSON.stringify({ cameras: $$in(box, "input:checked").map((c) => c.value) }) });
         toast("Cámaras actualizadas"); loadUsers();
-      } catch (err) { toast(err.message, true); }
+      } catch (err) { toast(err.message, true); save.disabled = false; }
     });
   });
 
