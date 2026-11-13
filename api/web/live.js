@@ -103,7 +103,7 @@ function restore() {
 $('#max').onclick = restore;
 document.addEventListener('keydown', e => { if (e.key === 'Escape') restore(); });
 
-// agregar cámaras → asistente de NVR; ⚙ → interfaz completa de administración
+// agregar cámaras → asistente de NVR; el botón de ajustes → interfaz completa de administración
 $('#btn-admin').onclick = () => location.href = '/nvr';
 $('#empty-admin').onclick = () => location.href = '/nvr';
 

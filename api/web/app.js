@@ -200,8 +200,13 @@ $$(".tab").forEach((tab) => {
     if (tab.dataset.view === "mosaico") enterWallView();
     if (tab.dataset.view === "grabaciones") loadRecDevices();
     if (tab.dataset.view === "ajustes") {
-      if (isAdmin()) { loadUsers(); fillKiosk(); loadEncoding(); loadHealth(); }
-      loadAlertPanel();
+      // Gestión: ajSelect(ajCurrent) carga la sección de Ajustes abierta; si esta
+      // rama aún no la tiene, se mantienen las cargas de siempre.
+      if (typeof ajSelect === "function") ajSelect(typeof ajCurrent !== "undefined" ? ajCurrent : undefined);
+      else {
+        if (isAdmin()) { loadUsers(); fillKiosk(); loadEncoding(); loadHealth(); }
+        loadAlertPanel();
+      }
     }
     // Fuera de la pestaña Mosaico el muro se detiene (sin fotogramas ni WebRTC).
     if (tab.dataset.view !== "mosaico") syncWall();
