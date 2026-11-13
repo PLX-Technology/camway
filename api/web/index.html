@@ -450,23 +450,25 @@
 <div id="waModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="waModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3 id="waModalTitle">Vincular WhatsApp que enviará las alertas</h3>
-      <button class="ghost small" id="waClose" data-modal-close>Cerrar</button>
+      <h3 id="waModalTitle">Vincular WhatsApp para las alertas</h3>
+      <button class="cw-ib cw-ib--sm" id="waClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
-    <p class="hint">En el celular del número que enviará las alertas abre
-      <strong>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</strong>
-      y escanea el código. Se renueva solo cada ~20 s.</p>
-    <div class="waqr">
+    <p class="mo-intro">En el celular que enviará las alertas abre <strong>WhatsApp → Dispositivos vinculados → Vincular un dispositivo</strong> y escanea el código. Se renueva solo cada ~20 s.</p>
+    <div class="mo-qr">
       <img id="waQr" alt="Código QR de WhatsApp" hidden>
-      <p class="hint" id="waQrMsg">Generando código…</p>
+      <p class="gx-hint" id="waQrMsg" role="status">Generando código…</p>
     </div>
-    <p class="hint mt-12">¿No puedes escanear? Vincula con el número de teléfono:</p>
-    <div class="userform">
-      <input id="waPhone" aria-label="Número del celular" type="tel" placeholder="número del celular, ej. +58 414 1234567" autocomplete="off">
-      <button id="waPair" class="ghost" type="button">Obtener código</button>
+    <div class="mo-section">
+      <div class="mo-sectitle">¿No puedes escanear? Vincula con el número</div>
+      <div class="mo-row">
+        <label class="gx-field mo-grow">Número del celular
+          <input id="waPhone" class="gx-in" type="tel" placeholder="+58 414 1234567" autocomplete="off">
+        </label>
+        <button id="waPair" class="cw-btn" type="button">Obtener código</button>
+      </div>
+      <p id="waCode" class="mo-code" hidden></p>
     </div>
-    <p id="waCode" class="wacode" hidden></p>
-    <div class="aifoot"><span class="hint" id="waState"></span></div>
+    <div class="mo-foot"><span class="gx-hint" id="waState" role="status"></span></div>
   </div>
 </div>
 
@@ -474,85 +476,82 @@
 <div id="aiModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle" hidden>
   <div class="modalcard">
     <div class="modalhead">
-      <h3 id="aiModalTitle">Comportamiento IA — <span id="aiCamName"></span></h3>
-      <button class="ghost small" id="aiClose" data-modal-close>Cerrar</button>
+      <h3 id="aiModalTitle">IA — <span id="aiCamName"></span></h3>
+      <button class="cw-ib cw-ib--sm" id="aiClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
-    <p class="hint">La detección corre en el servidor (YOLO) cuando está disponible;
-      si no, en el navegador como respaldo. El sonido suena en este navegador.</p>
+    <p class="mo-intro">La detección corre en el servidor cuando está disponible; si no, en este navegador. El sonido suena solo en este navegador.</p>
 
-    <label class="aitoggle">
-      <input type="checkbox" id="aiEnabled"> Activar detección en esta cámara
-    </label>
+    <label class="mo-switch"><input type="checkbox" id="aiEnabled" class="mo-sw"><span>Activar detección en esta cámara</span></label>
 
-    <div class="aigrid">
-      <label>Qué detectar
-        <select id="aiTarget">
+    <div class="mo-grid mo-grid1">
+      <label class="gx-field">Qué detectar
+        <select id="aiTarget" class="gx-in">
           <option value="vehiculo">Vehículo (auto, camión, bus, moto)</option>
           <option value="persona">Persona</option>
           <option value="ambos">Vehículo o persona</option>
-          <option value="fuego">🔥 Fuego / Humo</option>
-          <option value="epp">⛑️ Persona sin casco (EPP)</option>
+          <option value="fuego">Fuego o humo</option>
+          <option value="epp">Persona sin casco (EPP)</option>
         </select>
       </label>
-      <label>Al detectar
-        <select id="aiAction">
-          <option value="full">Pantalla completa + marco rojo parpadeante</option>
-          <option value="frame">Solo marco rojo parpadeante</option>
+      <label class="gx-field">Al detectar
+        <select id="aiAction" class="gx-in">
+          <option value="full">Pantalla completa y marco rojo</option>
+          <option value="frame">Solo marco rojo</option>
           <option value="badge">Solo aviso en la esquina</option>
         </select>
       </label>
-      <label>Confianza mínima: <span id="aiScoreVal">40%</span>
-        <input type="range" id="aiScore" min="20" max="90" step="5" value="40">
+      <label class="gx-field mo-span2">Confianza mínima: <strong id="aiScoreVal">40%</strong>
+        <input type="range" id="aiScore" class="mo-range" min="20" max="90" step="5" value="40">
       </label>
     </div>
 
-    <label class="aitoggle mt-12">
-      <input type="checkbox" id="aiSound"> Reproducir sonido de alarma al detectar
-    </label>
+    <label class="mo-switch"><input type="checkbox" id="aiSound" class="mo-sw"><span>Sonido de alarma al detectar</span></label>
 
-    <div class="aizone">
-      <button class="ghost" id="aiZoneBtn">Definir zona de detección…</button>
-      <span class="hint" id="aiZoneState"></span>
+    <div class="mo-zone">
+      <button class="cw-btn cw-btn--sm" id="aiZoneBtn" type="button">Definir zona de detección…</button>
+      <span class="gx-hint" id="aiZoneState"></span>
     </div>
 
-    <div class="aisched">
-      <label class="aitoggle"><input type="checkbox" id="aiSchedOn"> Solo en un horario</label>
-      <div id="aiSchedBody">
-        <div class="days" id="aiDays">
-          <button type="button" data-d="1" aria-label="Lunes">L</button>
-          <button type="button" data-d="2" aria-label="Martes">M</button>
-          <button type="button" data-d="3" aria-label="Miércoles">X</button>
-          <button type="button" data-d="4" aria-label="Jueves">J</button>
-          <button type="button" data-d="5" aria-label="Viernes">V</button>
-          <button type="button" data-d="6" aria-label="Sábado">S</button>
-          <button type="button" data-d="0" aria-label="Domingo">D</button>
+    <div class="mo-section">
+      <label class="mo-switch"><input type="checkbox" id="aiSchedOn" class="mo-sw"><span>Solo en un horario</span></label>
+      <div id="aiSchedBody" class="mo-sched">
+        <div class="mo-days" id="aiDays" role="group" aria-label="Días armados">
+          <button type="button" data-d="1" aria-label="Lunes" aria-pressed="false">L</button>
+          <button type="button" data-d="2" aria-label="Martes" aria-pressed="false">M</button>
+          <button type="button" data-d="3" aria-label="Miércoles" aria-pressed="false">X</button>
+          <button type="button" data-d="4" aria-label="Jueves" aria-pressed="false">J</button>
+          <button type="button" data-d="5" aria-label="Viernes" aria-pressed="false">V</button>
+          <button type="button" data-d="6" aria-label="Sábado" aria-pressed="false">S</button>
+          <button type="button" data-d="0" aria-label="Domingo" aria-pressed="false">D</button>
         </div>
-        <div class="timerow">
-          <label>Desde <input type="time" id="aiStart" value="21:00"></label>
-          <label>Hasta <input type="time" id="aiEnd" value="06:00"></label>
+        <div class="mo-row">
+          <label class="gx-field">Desde <input type="time" id="aiStart" class="gx-in" value="21:00"></label>
+          <label class="gx-field">Hasta <input type="time" id="aiEnd" class="gx-in" value="06:00"></label>
         </div>
-        <p class="hint" id="aiSchedHint"></p>
+        <p class="gx-hint" id="aiSchedHint"></p>
       </div>
     </div>
 
-    <!-- Avisos FUERA de pantalla: foto por WhatsApp / correo (regla del servidor,
-         funciona aunque nadie tenga el DVR abierto). Solo admin. -->
-    <div class="aisched" id="aiAlertBox" hidden>
-      <label class="aitoggle"><input type="checkbox" id="alEnabled"> 📲 Avisar con foto por WhatsApp / correo</label>
-      <div id="alBody" class="mt-8">
-        <p class="hint" id="alChannels"></p>
-        <div class="aigrid">
-          <label class="aitoggle"><input type="checkbox" id="alHead"> ⛑️ Persona sin casco</label>
-          <label class="aitoggle"><input type="checkbox" id="alFire"> 🔥 Fuego / humo</label>
-          <label>Confirmar tras
-            <select id="alHits">
+    <!-- Avisos fuera de pantalla: foto por WhatsApp / correo (regla del servidor,
+         funciona aunque nadie tenga el DVR abierto). Admin y seguridad. -->
+    <div class="mo-section" id="aiAlertBox" hidden>
+      <label class="mo-switch"><input type="checkbox" id="alEnabled" class="mo-sw"><span>Avisar con foto por WhatsApp o correo</span></label>
+      <div id="alBody" class="mo-alert">
+        <p class="gx-hint" id="alChannels"></p>
+        <div class="mo-checks">
+          <label class="mo-check"><input type="checkbox" id="alHead"><span>Persona sin casco</span></label>
+          <label class="mo-check"><input type="checkbox" id="alFire"><span>Fuego o humo</span></label>
+        </div>
+        <div class="mo-grid">
+          <label class="gx-field">Confirmar tras
+            <select id="alHits" class="gx-in">
               <option value="2">2 detecciones (más rápido)</option>
               <option value="3">3 detecciones</option>
               <option value="5">5 detecciones (menos falsos)</option>
             </select>
           </label>
-          <label>No repetir antes de
-            <select id="alCool">
+          <label class="gx-field">No repetir antes de
+            <select id="alCool" class="gx-in">
               <option value="60">1 minuto</option>
               <option value="300">5 minutos</option>
               <option value="900">15 minutos</option>
@@ -560,16 +559,16 @@
             </select>
           </label>
         </div>
-        <div class="aizone">
-          <button class="ghost" id="alTest" type="button">Enviar prueba a los destinatarios</button>
-          <span class="hint" id="alState"></span>
+        <div class="mo-zone">
+          <button class="cw-btn cw-btn--sm" id="alTest" type="button">Enviar prueba a los destinatarios</button>
+          <span class="gx-hint" id="alState" role="status"></span>
         </div>
       </div>
     </div>
 
-    <div class="aifoot">
-      <span class="hint" id="aiModelState"></span>
-      <button class="primary" id="aiSave">Guardar</button>
+    <div class="mo-foot">
+      <span class="gx-hint" id="aiModelState"></span>
+      <button class="cw-btn cw-btn--primary" id="aiSave" type="button">Guardar</button>
     </div>
   </div>
 </div>
@@ -579,31 +578,24 @@
   <div class="modalcard">
     <div class="modalhead">
       <h3 id="osdModalTitle">OSD en la cámara — <span id="osdCamName"></span></h3>
-      <button class="ghost small" id="osdClose" data-modal-close>Cerrar</button>
+      <button class="cw-ib cw-ib--sm" id="osdClose" type="button" aria-label="Cerrar" data-modal-close><svg class="cw-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
-    <p class="hint">Escribe el nombre y el sello de fecha/hora <strong>DENTRO de la cámara</strong>:
-      queda grabado en el propio video y en las grabaciones (lo ve cualquier reproductor).
-      Es un cambio <strong>permanente en el equipo</strong>. Funciona en HiLook/Hikvision
-      (ISAPI) y cámaras ONVIF como las HJT.</p>
-    <div class="aigrid">
-      <label>Nombre mostrado en el video
-        <input type="text" id="osdName" maxlength="32" placeholder="p.ej. TALADRO-1 PORTON">
-      </label>
+    <p class="mo-intro">Escribe el nombre y la fecha/hora <strong>dentro de la cámara</strong>: quedan grabados en el propio vídeo y en las grabaciones. Es un cambio <strong>permanente en el equipo</strong>. Funciona en HiLook/Hikvision (ISAPI) y cámaras ONVIF como las HJT.</p>
+    <label class="gx-field">Nombre mostrado en el vídeo
+      <input type="text" id="osdName" class="gx-in" maxlength="32" placeholder="p. ej. TALADRO-1 PORTÓN">
+    </label>
+    <div class="mo-checks mo-stack">
+      <label class="mo-check"><input type="checkbox" id="osdShowName" checked><span>Mostrar el nombre</span></label>
+      <label class="mo-check"><input type="checkbox" id="osdShowTime" checked><span>Mostrar fecha y hora</span></label>
+      <label class="mo-check"><input type="checkbox" id="osdSetTime"><span>Poner la cámara en hora</span></label>
     </div>
-    <label class="aitoggle"><input type="checkbox" id="osdShowName" checked> Mostrar el nombre</label>
-    <label class="aitoggle"><input type="checkbox" id="osdShowTime" checked> Mostrar fecha y hora</label>
-    <label class="aitoggle"><input type="checkbox" id="osdSetTime"> Poner la cámara en hora</label>
-    <div class="aigrid mt-6" id="osdNtpRow">
-      <label>Servidor NTP (sincronía permanente)
-        <input type="text" id="osdNtp" placeholder="p.ej. 172.16.10.83 o pool.ntp.org">
-      </label>
-    </div>
-    <p class="hint">Con servidor NTP la cámara se <strong>sincroniza sola</strong> contra él.
-      Vacío = se pone una sola vez con la hora del servidor. (NTP permanente: HiLook/ISAPI;
-      en ONVIF/HJT por ahora es una sola vez.)</p>
-    <div class="aifoot">
-      <span class="hint" id="osdState"></span>
-      <button class="primary" id="osdSave">Aplicar a la cámara</button>
+    <label class="gx-field" id="osdNtpRow">Servidor NTP (sincronía permanente)
+      <input type="text" id="osdNtp" class="gx-in" placeholder="p. ej. 172.16.10.83 o pool.ntp.org">
+    </label>
+    <p class="gx-hint">Con servidor NTP la cámara se sincroniza sola. Vacío = se pone una vez con la hora del servidor. (NTP permanente: HiLook/ISAPI; en ONVIF/HJT por ahora es una sola vez.)</p>
+    <div class="mo-foot">
+      <span class="gx-hint" id="osdState" role="status"></span>
+      <button class="cw-btn cw-btn--primary" id="osdSave" type="button">Aplicar a la cámara</button>
     </div>
   </div>
 </div>

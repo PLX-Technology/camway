@@ -2922,7 +2922,9 @@ function openAiModal(ctrl) {
   $("#aiStart").value = s.start;
   $("#aiEnd").value = s.end;
   $$("#aiDays button").forEach((b) => {
-    b.classList.toggle("on", s.days.includes(Number(b.dataset.d)));
+    const on = s.days.includes(Number(b.dataset.d));
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
   });
   refreshSchedBody();
 
@@ -3276,7 +3278,7 @@ async function loadAlertBox(streamId) {
     $("#alChannels").textContent = ch.length
       ? `Se enviará por: ${ch.join(" y ")}.` +
         (a.pending ? ` ${a.pending} aviso(s) en cola esperando enlace.` : "")
-      : "Sin destinatarios: agrega números en Ajustes → Destinatarios de alertas.";
+      : "Sin destinatarios: agrega números en Ajustes → Alertas.";
     $("#alTest").disabled = !ch.length;
   } catch (e) {
     $("#alChannels").textContent = "No se pudo leer la configuración de avisos.";
@@ -3367,6 +3369,7 @@ $("#aiDays").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-d]");
   if (!b) return;
   b.classList.toggle("on");
+  b.setAttribute("aria-pressed", String(b.classList.contains("on")));
   $("#aiEnabled").checked = true;
   refreshSchedBody();
 });
@@ -4266,55 +4269,56 @@ async function openRecModal(deviceId, title, recBtn) {
 
   const modal = document.createElement("div");
   modal.className = "modal";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "recCfgTitle");
   modal.innerHTML = `
     <div class="modalcard">
       <div class="modalhead">
-        <h3>Grabación local — ${esc(title)}</h3>
-        <button class="ghost small" data-close>Cerrar</button>
+        <h3 id="recCfgTitle">Grabación local — ${esc(title)}</h3>
+        <button type="button" class="cw-ib cw-ib--sm" data-modal-close aria-label="Cerrar">${icon("x", 16)}</button>
       </div>
-      <div class="aibody">
-        <label class="switch"><input type="checkbox" id="recEnabled" ${on ? "checked" : ""}>
-          <span>Grabar esta cámara</span></label>
-        <p class="hint">Por defecto NO se graba. Al activarla, la cámara queda
-          conectada 24/7 (consume CPU y disco). Borra sola lo más viejo.</p>
-        <div class="recfields">
-          <label>Modo
-            <select id="recMode">
-              <option value="hybrid"${cfg.mode !== "continuous" ? " selected" : ""}>Híbrido: continuo + clips de evento</option>
-              <option value="continuous"${cfg.mode === "continuous" ? " selected" : ""}>Solo continuo 24/7</option>
-            </select>
-          </label>
-          <label>Retención continuo (días)
-            <input type="number" id="recContDays" min="1" max="60" value="${esc(cfg.cont_days || 3)}">
-          </label>
-          <label id="recEvWrap">Retención clips de evento (días)
-            <input type="number" id="recEventDays" min="1" max="90" value="${esc(cfg.event_days || 7)}">
-          </label>
-        </div>
-        <div class="reclist" id="recList2">
-          ${data.recordings.length ? "" : '<p class="hint">Aún no hay grabaciones.</p>'}
-        </div>
+      <label class="mo-switch"><input type="checkbox" class="mo-sw" id="recEnabled" ${on ? "checked" : ""}>
+        <span>Grabar esta cámara</span></label>
+      <p class="mo-intro">Por defecto no se graba. Al activarla, la cámara queda conectada 24/7 (consume CPU y disco). Borra sola lo más viejo.</p>
+      <div class="mo-recfields">
+        <label class="gx-field mo-span2">Modo
+          <select id="recMode" class="gx-in">
+            <option value="hybrid"${cfg.mode !== "continuous" ? " selected" : ""}>Híbrido: continuo + clips de evento</option>
+            <option value="continuous"${cfg.mode === "continuous" ? " selected" : ""}>Solo continuo 24/7</option>
+          </select>
+        </label>
+        <label class="gx-field">Retención del continuo (días)
+          <input type="number" id="recContDays" class="gx-in" min="1" max="60" value="${esc(cfg.cont_days || 3)}">
+        </label>
+        <label class="gx-field" id="recEvWrap">Retención de clips de evento (días)
+          <input type="number" id="recEventDays" class="gx-in" min="1" max="90" value="${esc(cfg.event_days || 7)}">
+        </label>
       </div>
-      <div class="aifoot">
-        <span class="hint" id="recSaveHint"></span>
-        <button class="primary" data-save>Guardar</button>
+      <div class="mo-reclist" id="recList2">
+        ${data.recordings.length ? "" : '<p class="gx-empty">Aún no hay grabaciones.</p>'}
+      </div>
+      <div class="mo-foot">
+        <span class="gx-hint" id="recSaveHint" role="status"></span>
+        <button type="button" class="cw-btn cw-btn--primary" data-save>Guardar</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
 
   const list = modal.querySelector("#recList2");
   for (const r of data.recordings) {
-    const row = document.createElement("div");
-    row.className = "recrow";
-    const tag = r.kind === "event" ? '<span class="evtag">evento</span>' : "";
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "mo-recrow";
+    const tag = r.kind === "event" ? '<span class="mo-evtag">evento</span>' : "";
     const url = `/api/recordings/${deviceId}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${r.kind}`;
-    row.innerHTML = `<span class="rt">▶ ${esc(fmtRecTime(r.mtime))} ${tag}</span><span class="rs">${esc(fmtSize(r.size))}</span>`;
+    row.innerHTML = `<span class="rt">${icon("play", 12)}${esc(fmtRecTime(r.mtime))} ${tag}</span><span class="rs">${esc(fmtSize(r.size))}</span>`;
     row.addEventListener("click", () => playRecUrl(`${title} — ${fmtRecTime(r.mtime)}`, url));
     list.appendChild(row);
   }
 
   const close = () => modal.remove();
-  modal.querySelector("[data-close]").addEventListener("click", close);
+  modal.querySelector("[data-modal-close]").addEventListener("click", close);
   modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
 
   const syncMode = () => {
