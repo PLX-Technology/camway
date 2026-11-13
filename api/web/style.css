@@ -374,6 +374,13 @@ summary:hover { color: var(--text); }
   background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 20px; width: 460px; max-width: 100%;
 }
+/* Diálogos propios (ui.js: uiPrompt / uiConfirm) */
+.uicard { width: 420px; display: flex; flex-direction: column; gap: 12px; }
+.uimsg { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.uifield { width: 100%; }
+.uibtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+button.primary.danger { background: #b3261e; border-color: #b3261e; color: #fff; }
+button.primary.danger:hover:not(:disabled) { background: #d0342b; }
 .modalhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .modalhead h3 { margin: 0; font-size: 15px; }
 .aitoggle { display: flex; align-items: center; gap: 8px; margin: 14px 0; font-size: 14px; cursor: pointer; }
