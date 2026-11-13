@@ -14,98 +14,98 @@
   let CFG = { layout: 4, page: 0, pages: 1, cols: 2, rows: 2, cells: [], total: 0 };
   let GRIDP = null;     // player del mosaico (1 stream)
   let MAXP = null;      // player de la cámara maximizada (directo)
-  let watchTimer = null;
   let busy = false;
 
-  function iceDone(pc, ms = 1200) {
-    return new Promise(res => {
-      if (pc.iceGatheringState === 'complete') return res();
-      const t = setTimeout(res, ms);
-      pc.addEventListener('icegatheringstatechange', () => {
-        if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); }
-      });
-    });
+  // Reproductor: la clase compartida de whep.js, con la política del DVR. Solo
+  // vídeo; el mosaico del servidor tarda unos segundos en montar, así que se
+  // reintenta RÁPIDO al inicio para engancharlo apenas esté listo.
+  function dvrRetry(n) { return n <= 12 ? 500 : n <= 20 ? 2000 : 8000; }
+  function makePlayer(whep, video, stateEl, extra) {
+    const onLive = extra && extra.onLive;
+    const setState = txt => {
+      if (!stateEl) return;
+      stateEl.textContent = txt || '';
+      stateEl.style.display = txt ? '' : 'none';
+    };
+    return new WhepPlayer(whep, video, Object.assign({
+      audio: false,
+      reconnectOn: ['failed'],
+      iceWaitMs: 1200,
+      armOn: 'answer',
+      liveOn: 'playing',
+      retryDelay: dvrRetry,
+      // se congela: a los 12 s intenta reanudar el <video>; a los 20 s reconecta
+      watchdog: { everyMs: 1000, replayMs: 12000, stallMs: 20000, minStep: 0.02 },
+      onState: (st, n) => {
+        if (st === 'live') { setState(''); if (onLive) onLive(); }
+        else if (st === 'novideo') setState('sin video');
+        else if (st === 'offline') setState(n > 20 ? 'sin señal' : 'conectando…');
+        else setState('conectando…');
+      },
+    }, extra || {}));
   }
 
-  class Player {
-    constructor(whep, video, stateEl) {
-      this.whep = whep; this.video = video; this.stateEl = stateEl;
-      this.pc = null; this.loc = null; this.retry = 0; this.dead = false;
-      this.lastTime = 0; this.lastAdvance = Date.now(); this.t = null;
-    }
-    setState(txt) {
-      if (!this.stateEl) return;
-      this.stateEl.textContent = txt || '';
-      this.stateEl.style.display = txt ? '' : 'none';
-    }
-    async start() {
-      this._teardown();
-      if (this.dead || !this.whep) { this.setState('sin video'); return; }
-      this.setState('conectando…');
-      try {
-        const pc = new RTCPeerConnection({ iceServers: [] });
-        this.pc = pc;
-        pc.addTransceiver('video', { direction: 'recvonly' });
-        pc.ontrack = e => { if (this.video.srcObject !== e.streams[0]) this.video.srcObject = e.streams[0]; };
-        pc.onconnectionstatechange = () => { if (pc === this.pc && pc.connectionState === 'failed') this._reconnect(); };
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await iceDone(pc);
-        const res = await fetch(this.whep, { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp });
-        if (!res.ok) throw new Error('whep ' + res.status);
-        const ans = await res.text();
-        this.loc = res.headers.get('Location');
-        await pc.setRemoteDescription({ type: 'answer', sdp: ans });
-        this.retry = 0; this.lastAdvance = Date.now();
-        const clear = () => this.setState('');
-        this.video.addEventListener('playing', clear, { once: true });
-        setTimeout(() => { if (this.pc === pc) clear(); }, 4500);
-      } catch (e) { this._reconnect(); }
-    }
-    _reconnect() {
-      if (this.dead) return;
-      this.retry += 1;
-      let delay;
-      // El mosaico del servidor tarda unos segundos en montar: reintentar RÁPIDO
-      // al inicio para engancharlo apenas esté listo (no backoff largo de entrada).
-      if (this.retry <= 12) { delay = 500; this.setState('conectando…'); }
-      else if (this.retry <= 20) { delay = 2000; this.setState('conectando…'); }
-      else { delay = 8000; this.setState('sin señal'); }
-      clearTimeout(this.t);
-      this.t = setTimeout(() => this.start(), delay);
-    }
-    _teardown() {
-      clearTimeout(this.t);
-      try { if (this.pc) this.pc.close(); } catch (e) {}
-      if (this.loc) { fetch(this.loc, { method: 'DELETE' }).catch(() => {}); this.loc = null; }
-      this.pc = null;
-      try { this.video.srcObject = null; } catch (e) {}
-    }
-    stop() { this.dead = true; this._teardown(); }
-    watch() {
-      if (this.dead || !this.pc) return;
-      const t = this.video.currentTime;
-      if (t > this.lastTime + 0.02) { this.lastTime = t; this.lastAdvance = Date.now(); return; }
-      const stalled = Date.now() - this.lastAdvance;
-      if (stalled > 12000 && stalled <= 20000) { try { this.video.play().catch(() => {}); } catch (e) {} }
-      else if (stalled > 20000) { this.lastAdvance = Date.now(); this._reconnect(); }
-    }
-  }
+  function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
-  function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  // Mensaje en lugar del mosaico (error del servidor, permisos…). role=alert para
+  // que los lectores de pantalla lo anuncien; reutiliza .dvr-state del CSS.
+  function stageMessage(text) {
+    if (GRIDP) { GRIDP.stop(); GRIDP = null; }
+    stageWrap.innerHTML = `<div class="dvr-stage"><div class="dvr-state" role="alert">${esc(text)}</div></div>`;
+  }
 
   // --- pide al servidor el mosaico para (layout, page) y lo reproduce ---
   async function applyMosaic(layout, page) {
     if (busy) return; busy = true;
     try {
-      const r = await fetch('/api/mosaic', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ layout, page })
-      });
-      CFG = await r.json();
-    } catch (e) { busy = false; return; }
-    renderStage();
-    busy = false;
+      let r;
+      try {
+        r = await fetch('/api/mosaic', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ layout, page })
+        });
+      } catch (e) { stageMessage('No se pudo contactar con el servidor.'); return; }
+      if (!r.ok) {
+        // 403 «no tienes cámaras asignadas», 401 sesión caducada…: se muestra el
+        // texto del servidor y NO se abre el reproductor.
+        let detail = '';
+        try { detail = (await r.json()).detail || ''; } catch (e) {}
+        stageMessage(detail || ('El servidor respondió ' + r.status + '.'));
+        return;
+      }
+      try { CFG = await r.json(); }
+      catch (e) { stageMessage('Respuesta no válida del servidor.'); return; }
+      renderStage();
+    } finally { busy = false; }
+  }
+
+  // --- el mosaico del servidor es UNO para todos (un solo ffmpeg): lo arma quien
+  // llamó último a POST /api/mosaic, con SUS cámaras. Si otra persona lo armó con
+  // cámaras que yo no tengo, /whep/mosaico responde 403 (o 404 «mosaico no armado»).
+  // No se reintenta en bucle: se rearma UNA vez el mío y, si vuelve el 403 (dos
+  // personas alternando), se espera 5 s, 10 s, 20 s… y se explica en pantalla.
+  const REARM_BASE_MS = 5000, REARM_MAX_MS = 30000;
+  let rearmTries = 0, rearmTimer = null;
+
+  function resetRearm() { rearmTries = 0; clearTimeout(rearmTimer); rearmTimer = null; }
+
+  // Acción del usuario (abrir, página, cuadrícula): empieza de cero.
+  function userApplyMosaic(layout, page) { resetRearm(); return applyMosaic(layout, page); }
+
+  function mosaicDenied(status, player, detail) {
+    if (player !== GRIDP) return false;            // solo el del mosaico
+    const foreign = status === 403;
+    const notArmed = status === 404 && /no armado/i.test(detail || '');
+    if (!foreign && !notArmed) return false;       // p. ej. el ffmpeg montándose: reintento normal
+    if (rearmTries === 0) { rearmTries = 1; applyMosaic(CFG.layout, CFG.page); return true; }
+    const wait = Math.min(REARM_BASE_MS * 2 ** (rearmTries - 1), REARM_MAX_MS);
+    rearmTries++;
+    stageMessage((foreign
+      ? 'Otra persona está usando el mosaico con otras cámaras.'
+      : 'El mosaico todavía no está armado.') + ' Reintentando en ' + Math.round(wait / 1000) + ' s…');
+    clearTimeout(rearmTimer);
+    rearmTimer = setTimeout(() => { rearmTimer = null; if (!view.hidden) applyMosaic(CFG.layout, CFG.page); }, wait);
+    return true;
   }
 
   function renderStage() {
@@ -129,7 +129,7 @@
     const load = on => stage.classList.toggle('loading', on);
     vid.addEventListener('playing', () => load(false));
     ['waiting', 'stalled', 'emptied'].forEach(ev => vid.addEventListener(ev, () => load(true)));
-    GRIDP = new Player(CFG.whep, vid, null);
+    GRIDP = makePlayer(CFG.whep, vid, null, { onHttpError: mosaicDenied, onLive: resetRearm });
     GRIDP.start();
     // doble clic en una celda → maximizar esa cámara (stream directo)
     stage.querySelector('.dvr-ovl').addEventListener('dblclick', ev => {
@@ -149,8 +149,8 @@
     // Pausa el mosaico mientras se ve una cámara ampliada: su <video> queda
     // OCULTO y, si sigue recibiendo, el jitter buffer de WebRTC acumula retraso
     // → al volver se veía imagen vieja. Además evita el doble stream.
-    if (GRIDP) GRIDP._teardown();
-    MAXP = new Player(c.whep, view.querySelector('#dvrMaxVideo'), view.querySelector('#dvrMaxState'));
+    if (GRIDP) GRIDP.stop();
+    MAXP = makePlayer(c.whep, view.querySelector('#dvrMaxVideo'), view.querySelector('#dvrMaxState'));
     MAXP.start();
   }
   function unmaximize() {
@@ -163,7 +163,8 @@
     if (GRIDP) GRIDP.start();
   }
 
-  function pauseWall(p) { try { document.getElementById(p ? 'btnWallStop' : 'btnWallStart')?.click(); } catch (e) {} }
+  // El muro de app.js se detiene solo mientras body.dvr-open esté puesto.
+  function syncWall() { try { window.CamWayWall && window.CamWayWall.sync(); } catch (e) {} }
 
   async function hasCams() {
     try { const d = await (await fetch('/api/wall', { cache: 'no-store' })).json(); return (d.tiles || []).some(t => t.whep); }
@@ -171,24 +172,22 @@
   }
 
   async function openDvr() {
-    pauseWall(true);
     view.hidden = false;
     document.body.classList.add('dvr-open');
-    await applyMosaic(CFG.layout || 4, 0);
-    clearInterval(watchTimer);
-    watchTimer = setInterval(() => { if (GRIDP) GRIDP.watch(); if (MAXP) MAXP.watch(); }, 1000);
+    syncWall();
+    await userApplyMosaic(CFG.layout || 4, 0);
   }
   function closeDvr() {
+    resetRearm();
     unmaximize();
     if (GRIDP) { GRIDP.stop(); GRIDP = null; }
-    clearInterval(watchTimer); watchTimer = null;
     // NO se detiene el mosaico del servidor al cerrar: se deja CALIENTE para que
     // reabrir el DVR sea instantáneo (estación de monitoreo). Se reconfigura solo
     // al cambiar layout/página.
     view.hidden = true;
     document.body.classList.remove('dvr-open');
     try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
-    pauseWall(false);
+    syncWall();
   }
 
   async function autoStart() { if (await hasCams()) openDvr(); }
@@ -196,9 +195,9 @@
 
   document.getElementById('btnDvr')?.addEventListener('click', openDvr);
   view.querySelector('#dvrClose').addEventListener('click', closeDvr);
-  view.querySelector('#dvrPrev').addEventListener('click', () => { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); applyMosaic(CFG.layout, p); });
-  view.querySelector('#dvrNext').addEventListener('click', () => { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); applyMosaic(CFG.layout, p); });
-  view.querySelector('#dvrLayout').addEventListener('change', e => { applyMosaic(parseInt(e.target.value, 10) || 4, 0); });
+  view.querySelector('#dvrPrev').addEventListener('click', () => { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); });
+  view.querySelector('#dvrNext').addEventListener('click', () => { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); });
+  view.querySelector('#dvrLayout').addEventListener('change', e => { userApplyMosaic(parseInt(e.target.value, 10) || 4, 0); });
   view.querySelector('#dvrFull').addEventListener('click', () => {
     try { if (document.fullscreenElement) document.exitFullscreen(); else view.requestFullscreen(); } catch (e) {}
   });
@@ -211,7 +210,7 @@
   document.addEventListener('keydown', e => {
     if (view.hidden) return;
     if (e.key === 'Escape') { view.classList.contains('maxed') ? unmaximize() : closeDvr(); }
-    else if (e.key === 'ArrowRight') { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); applyMosaic(CFG.layout, p); }
-    else if (e.key === 'ArrowLeft') { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); applyMosaic(CFG.layout, p); }
+    else if (e.key === 'ArrowRight') { const p = ((CFG.page || 0) + 1) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); }
+    else if (e.key === 'ArrowLeft') { const p = ((CFG.page || 0) - 1 + (CFG.pages || 1)) % (CFG.pages || 1); userApplyMosaic(CFG.layout, p); }
   });
 })();

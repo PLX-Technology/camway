@@ -9,97 +9,45 @@ const GRID = $('#grid');
 let PLAYERS = [];
 let MAXP = null;              // player maximizado (overlay)
 
-function iceDone(pc, ms = 1200) {
-  return new Promise(res => {
-    if (pc.iceGatheringState === 'complete') return res();
-    const t = setTimeout(res, ms);
-    pc.addEventListener('icegatheringstatechange', () => {
-      if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); }
-    });
-  });
+// Reproductor: la clase compartida de whep.js con la política de la rejilla en
+// vivo. Reintentos escalonados: una cámara que NO vuelve (p. ej. Canal 1 caído u
+// otro códec) NO debe recrear una conexión WebRTC cada pocos segundos para
+// siempre — ese churn de PeerConnections es lo que termina congelando el WebView2
+// y tumba TODA la rejilla. Tras varios fallos pasa a reintentos lentos y deja
+// fluidas a las cámaras sanas.
+function liveRetry(n) { return n <= 4 ? 600 * n : n <= 8 ? 8000 : 20000; }
+
+function setCellState(stateEl, txt) {
+  if (!stateEl) return;
+  if (!txt) { stateEl.classList.add('hidden'); return; }
+  stateEl.classList.remove('hidden');
+  stateEl.innerHTML = `<div class="spin"></div><div>${esc(txt)}</div>`;
 }
 
-class Player {
-  constructor(tile, video, stateEl) {
-    this.tile = tile; this.video = video; this.stateEl = stateEl;
-    this.pc = null; this.loc = null; this.retry = 0; this.dead = false;
-    this.hi = false; this.t = null; this.lastTime = 0; this.lastAdvance = Date.now();
-  }
-  url() { return (this.hi && this.tile.whep_hi) ? this.tile.whep_hi : this.tile.whep; }
-  setState(txt) {
-    if (!this.stateEl) return;
-    if (!txt) { this.stateEl.classList.add('hidden'); return; }
-    this.stateEl.classList.remove('hidden');
-    this.stateEl.innerHTML = `<div class="spin"></div><div>${txt}</div>`;
-  }
-  async start() {
-    this._teardown();
-    if (this.dead) return;
-    if (!this.url()) { this.setState('sin video'); return; }
-    this.setState('conectando…');
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [] });
-      this.pc = pc;
-      pc.addTransceiver('video', { direction: 'recvonly' });
-      pc.addTransceiver('audio', { direction: 'recvonly' });
-      pc.ontrack = e => { if (this.video.srcObject !== e.streams[0]) this.video.srcObject = e.streams[0]; };
-      pc.onconnectionstatechange = () => {
-        // 'disconnected' es TRANSITORIO (ICE se recupera solo en segundos): NO
-        // reconectar por eso o se produce un churn de conexión/desconexión.
-        // Solo 'failed' es definitivo; un congelado real lo caza el watchdog.
-        if (pc === this.pc && pc.connectionState === 'failed') this._reconnect();
-      };
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await iceDone(pc);
-      const res = await fetch(this.url(), {
-        method: 'POST', headers: { 'Content-Type': 'application/sdp' },
-        body: pc.localDescription.sdp,
-      });
-      if (!res.ok) throw new Error('whep ' + res.status);
-      const ans = await res.text();
-      this.loc = res.headers.get('Location');
-      await pc.setRemoteDescription({ type: 'answer', sdp: ans });
-      this.retry = 0; this.lastAdvance = Date.now();
-      const clear = () => this.setState('');
-      this.video.addEventListener('playing', clear, { once: true });
-      setTimeout(() => { if (this.pc === pc) clear(); }, 4000);   // respaldo
-    } catch (e) { this._reconnect(); }
-  }
-  _reconnect() {
-    if (this.dead) return;
-    this.retry += 1;
-    // Backoff escalonado. Lo clave: una cámara que NO vuelve (p. ej. Canal 1
-    // caído u otro códec) NO debe recrear una conexión WebRTC cada pocos
-    // segundos para siempre — ese churn de PeerConnections es lo que termina
-    // congelando el WebView2 y tumba TODA la rejilla. Tras varios fallos pasa
-    // a reintentos lentos y deja fluidas a las cámaras sanas.
-    let delay;
-    if (this.retry <= 4) { delay = 600 * this.retry; this.setState('reconectando…'); }   // 0.6–2.4 s: corte transitorio
-    else if (this.retry <= 8) { delay = 8000; this.setState('sin señal · reintentando'); }
-    else { delay = 20000; this.setState('sin señal · reintentando'); }                     // caída sostenida: no machacar
-    clearTimeout(this.t);
-    this.t = setTimeout(() => this.start(), delay);
-  }
-  _teardown() {
-    clearTimeout(this.t);
-    try { if (this.pc) this.pc.close(); } catch (e) {}
-    if (this.loc) { fetch(this.loc, { method: 'DELETE' }).catch(() => {}); this.loc = null; }
-    this.pc = null;
-    try { this.video.srcObject = null; } catch (e) {}
-  }
-  stop() { this.dead = true; this._teardown(); }
-  // vigilancia de congelado: si el tiempo del video no avanza, reconectar
-  watch() {
-    if (this.dead || !this.pc) return;
-    const t = this.video.currentTime;
-    if (t > this.lastTime + 0.02) { this.lastTime = t; this.lastAdvance = Date.now(); return; }
+function makePlayer(tile, video, stateEl, hi) {
+  const url = (hi && tile.whep_hi) ? tile.whep_hi : tile.whep;
+  const p = new WhepPlayer(url, video, {
+    // 'disconnected' es TRANSITORIO (ICE se recupera solo en segundos): NO
+    // reconectar por eso o se produce un churn de conexión/desconexión.
+    // Solo 'failed' es definitivo; un congelado real lo caza el watchdog.
+    reconnectOn: ['failed'],
+    iceWaitMs: 1200,
+    armOn: 'answer',
+    liveOn: 'playing',
+    retryDelay: liveRetry,
     // Congelado: dale tiempo a que ICE se recupere; a los 12 s intenta reanudar
     // el <video> (muchas veces solo se pausó) y recién a los 20 s reconecta.
-    const stalled = Date.now() - this.lastAdvance;
-    if (stalled > 12000 && stalled <= 20000) { try { this.video.play().catch(() => {}); } catch (e) {} }
-    else if (stalled > 20000) { this.lastAdvance = Date.now(); this._reconnect(); }
-  }
+    watchdog: { everyMs: 1000, replayMs: 12000, stallMs: 20000, minStep: 0.02 },
+    onState: (st, n) => {
+      if (st === 'live') setCellState(stateEl, '');
+      else if (st === 'novideo') setCellState(stateEl, 'sin video');
+      else if (st === 'offline') setCellState(stateEl, n <= 4 ? 'reconectando…' : 'sin señal · reintentando');
+      else setCellState(stateEl, 'conectando…');
+    },
+  });
+  p.tile = tile;
+  p.t = null;          // temporizador del arranque escalonado
+  return p;
 }
 
 function setStatus(txt) { $('#st').textContent = txt; }
@@ -110,7 +58,7 @@ async function build() {
   catch (e) { setStatus('sin servidor'); setTimeout(build, 3000); return; }
   const tiles = (data.tiles || []).filter(t => t.whep);   // solo las que tienen video WebRTC
   // limpiar lo anterior
-  PLAYERS.forEach(p => p.stop()); PLAYERS = [];
+  PLAYERS.forEach(p => { clearTimeout(p.t); p.stop(); }); PLAYERS = [];
   GRID.innerHTML = '';
   if (!tiles.length) {
     $('#empty').classList.add('on');
@@ -129,7 +77,7 @@ async function build() {
       <div class="state"><div class="spin"></div><div>conectando…</div></div>
       <div class="name">${esc(t.title || t.host || '')}</div>`;
     GRID.appendChild(cell);
-    const p = new Player(t, cell.querySelector('video'), cell.querySelector('.state'));
+    const p = makePlayer(t, cell.querySelector('video'), cell.querySelector('.state'), false);
     cell.onclick = () => maximize(p);
     PLAYERS.push(p);
   });
@@ -142,8 +90,7 @@ async function build() {
 
 // ---- maximizar una cámara (usa el principal whep_hi si existe) ----
 function maximize(p) {
-  MAXP = new Player(p.tile, $('#max-v'), null);
-  MAXP.hi = true;
+  MAXP = makePlayer(p.tile, $('#max-v'), null, true);
   $('#max-name').textContent = p.tile.title || '';
   $('#max').classList.add('on');
   MAXP.start();
@@ -160,9 +107,6 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') restore(); }
 $('#btn-admin').onclick = () => location.href = '/nvr';
 $('#empty-admin').onclick = () => location.href = '/nvr';
 
-// vigilancia global de congelado (1/s) + del maximizado
-setInterval(() => { PLAYERS.forEach(p => p.watch()); if (MAXP) MAXP.watch(); }, 1000);
-
 // recargar el catálogo cada tanto por si se agregan/quitan cámaras
 setInterval(async () => {
   try {
@@ -175,6 +119,6 @@ setInterval(async () => {
   } catch (e) {}
 }, 15000);
 
-function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 build();
