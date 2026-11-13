@@ -360,7 +360,7 @@ function renderDevice(dev, animate) {
 
   const badges = [];
   if (dev.vendor && dev.vendor !== "desconocido")
-    badges.push(`<span class="badge vendor">${dev.vendor}</span>`);
+    badges.push(`<span class="badge vendor">${esc(dev.vendor)}</span>`);
   if (dev.kind === "nvr")
     badges.push(`<span class="badge nvr">DVR/NVR · ${dev.streams.length} canales</span>`);
   badges.push(dev.needs_auth
@@ -372,19 +372,19 @@ function renderDevice(dev, animate) {
   card.innerHTML = `
     <div class="cardhead">
       <div class="cardtitle">
-        <span class="host">${dev.host}:${dev.port}</span>
-        <span class="name" data-name>${dev.name || ""}</span>
+        <span class="host">${esc(dev.host)}:${esc(dev.port)}</span>
+        <span class="name" data-name>${esc(dev.name)}</span>
         <button class="ghost small" data-act="rename" style="margin-left:auto">Nombrar</button>
         <button class="ghost small" data-act="osd">OSD</button>
         <button class="ghost small" data-act="forget">Olvidar</button>
       </div>
-      <div class="cardsub">${dev.server || "sin banner"}</div>
+      <div class="cardsub">${dev.server ? esc(dev.server) : "sin banner"}</div>
       <div class="badges">${badges.join("")}</div>
     </div>
     <ul class="streams">
       ${dev.streams.map((s) => renderStream(dev, s)).join("")}
     </ul>
-    ${dev.error ? `<div class="carderr">${dev.error}</div>` : ""}
+    ${dev.error ? `<div class="carderr">${esc(dev.error)}</div>` : ""}
     ${(dev.needs_auth && dev.streams.length === 0) ? `
       <div class="authform">
         <div class="authrow">
@@ -475,24 +475,24 @@ function renderStream(dev, s) {
   return `
     <li class="streamrow">
       ${sid
-        ? `<img class="thumb" data-snap data-sid="${sid}" data-auto="0"
+        ? `<img class="thumb" data-snap data-sid="${esc(sid)}" data-auto="0"
                 alt="miniatura" title="Pulsa para capturar un fotograma"
                 src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">`
         : `<div class="thumb vacia">sin guardar</div>`}
       <div class="streaminfo">
         <div class="top">
-          <span class="path" title="${s.url}">${s.path}</span>
-          <span class="chip ${codecClass}">${s.codec}</span>
+          <span class="path" title="${esc(s.url)}">${esc(s.path)}</span>
+          <span class="chip ${codecClass}">${esc(s.codec)}</span>
           ${s.audio_codec ? `<span class="chip">audio</span>` : ""}
         </div>
         <div class="meta">
-          ${dims(s)}${s.profile ? " · " + s.profile : ""} · ${s.label}
+          ${esc(dims(s))}${s.profile ? " · " + esc(s.profile) : ""} · ${esc(s.label)}
           ${s.webrtc_ready ? "" : " · necesita transcodificar para WebRTC"}
         </div>
       </div>
       ${publishable
         ? `<button class="${pub ? "ghost" : "primary"} small"
-                   data-publish data-sid="${sid}" data-pub="${pub ? 1 : 0}">
+                   data-publish data-sid="${esc(sid)}" data-pub="${pub ? 1 : 0}">
              ${pub ? "Quitar" : "Publicar"}
            </button>`
         : ""}
@@ -3268,8 +3268,8 @@ async function loadRecDevices() {
   // menú con miniatura por cámara
   $("#recCamMenu").innerHTML = recDevices.map((d, i) => `
     <div class="ts-item" data-i="${i}">
-      <img src="${d.thumb || ""}" alt="" onerror="this.style.visibility='hidden'">
-      <span class="n">${d.name}</span>
+      <img src="${esc(d.thumb)}" alt="" onerror="this.style.visibility='hidden'">
+      <span class="n">${esc(d.name)}</span>
     </div>`).join("");
   $$("#recCamMenu .ts-item").forEach((el) =>
     el.addEventListener("click", () => { recSelectDevice(recDevices[+el.dataset.i]); loadClips(); }));
@@ -3342,7 +3342,7 @@ function localRecCard(dev, r) {
       <span class="play">▶</span>${tag}
       <span class="dur">${label}</span>
     </div>
-    <div class="recmeta"><div class="t">${fmtRecTime(r.mtime)}</div><div class="s">${fmtSize(r.size)}</div></div>`;
+    <div class="recmeta"><div class="t">${esc(fmtRecTime(r.mtime))}</div><div class="s">${esc(fmtSize(r.size))}</div></div>`;
   el.addEventListener("click", () =>
     playRecUrl(`${recSelected.name} — ${fmtRecTime(r.mtime)}`, url));
   return el;
@@ -3371,14 +3371,14 @@ function recCard(dev, c) {
   el.className = "reccard";
   const dur = (c.size || "").split("(")[0].trim();
   const alert = (c.flags & 2) ? '<span class="alert" title="Con alerta">🔔</span>' : "";
-  const thumb = `/api/recordings/${dev}/thumb?path=${encodeURIComponent(c.path)}`;
+  const thumb = `/api/recordings/${encodeURIComponent(dev)}/thumb?path=${encodeURIComponent(c.path)}`;
   el.innerHTML = `
     <div class="recthumb">
-      <img data-src="${thumb}" alt="" decoding="async" onerror="this.style.display='none'">
+      <img data-src="${esc(thumb)}" alt="" decoding="async" onerror="this.style.display='none'">
       <span class="play">▶</span>${alert}
-      <span class="dur">${dur}</span>
+      <span class="dur">${esc(dur)}</span>
     </div>
-    <div class="recmeta"><div class="t">${fmtClipTime(c.date)}</div><div class="s">${c.size || ""}</div></div>`;
+    <div class="recmeta"><div class="t">${esc(fmtClipTime(c.date))}</div><div class="s">${esc(c.size)}</div></div>`;
   el.addEventListener("click", () => openRecPlayer(dev, c));
   return el;
 }
@@ -3444,7 +3444,7 @@ async function openRecModal(deviceId, title, recBtn) {
   modal.innerHTML = `
     <div class="modalcard">
       <div class="modalhead">
-        <h3>Grabación local — ${title}</h3>
+        <h3>Grabación local — ${esc(title)}</h3>
         <button class="ghost small" data-close>Cerrar</button>
       </div>
       <div class="aibody">
@@ -3460,10 +3460,10 @@ async function openRecModal(deviceId, title, recBtn) {
             </select>
           </label>
           <label>Retención continuo (días)
-            <input type="number" id="recContDays" min="1" max="60" value="${cfg.cont_days || 3}">
+            <input type="number" id="recContDays" min="1" max="60" value="${esc(cfg.cont_days || 3)}">
           </label>
           <label id="recEvWrap">Retención clips de evento (días)
-            <input type="number" id="recEventDays" min="1" max="90" value="${cfg.event_days || 7}">
+            <input type="number" id="recEventDays" min="1" max="90" value="${esc(cfg.event_days || 7)}">
           </label>
         </div>
         <div class="reclist" id="recList2">
@@ -3483,7 +3483,7 @@ async function openRecModal(deviceId, title, recBtn) {
     row.className = "recrow";
     const tag = r.kind === "event" ? '<span class="evtag">evento</span>' : "";
     const url = `/api/recordings/${deviceId}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${r.kind}`;
-    row.innerHTML = `<span class="rt">▶ ${fmtRecTime(r.mtime)} ${tag}</span><span class="rs">${fmtSize(r.size)}</span>`;
+    row.innerHTML = `<span class="rt">▶ ${esc(fmtRecTime(r.mtime))} ${tag}</span><span class="rs">${esc(fmtSize(r.size))}</span>`;
     row.addEventListener("click", () => playRecUrl(`${title} — ${fmtRecTime(r.mtime)}`, url));
     list.appendChild(row);
   }
@@ -3636,15 +3636,15 @@ async function buildCamChecks(container, selected = []) {
   const devs = await deviceList();
   container.innerHTML = devs.map((d) => {
     const pub = (d.streams || []).find((s) => s.published);
-    const thumb = pub ? `/api/wall/${pub.id}/frame` : "";   // fotograma cacheado
+    const thumb = pub ? `/api/wall/${encodeURIComponent(pub.id)}/frame` : "";   // fotograma cacheado
     return `
     <label class="camcheck">
       <span class="camthumb">${thumb
-        ? `<img src="${thumb}" alt="" onerror="this.remove()">`
+        ? `<img src="${esc(thumb)}" alt="" onerror="this.remove()">`
         : ""}<span class="noimg">sin vista</span></span>
       <span class="camrow">
-        <input type="checkbox" value="${d.id}" ${sel.has(d.id) ? "checked" : ""}>
-        <span class="camname">${camLabel(d)}</span>
+        <input type="checkbox" value="${esc(d.id)}" ${sel.has(d.id) ? "checked" : ""}>
+        <span class="camname">${esc(camLabel(d))}</span>
       </span>
     </label>`;
   }).join("") || '<span class="hint">Escanea o agrega cámaras primero.</span>';
@@ -3682,8 +3682,8 @@ function userRow(u) {
   const li = document.createElement("li");
   const admin = u.role === "admin";
   li.innerHTML = `
-    <span class="uname">${u.username}</span>
-    <span class="urole ${admin ? "admin" : ""}">${u.role}</span>
+    <span class="uname">${esc(u.username)}</span>
+    <span class="urole ${admin ? "admin" : ""}">${esc(u.role)}</span>
     <span class="ucount">${admin ? "todas las cámaras" : u.cameras.length + " cámara(s)"}</span>
     <span class="uspacer"></span>
     ${admin ? "" : '<button class="ghost small" data-edit>Cámaras</button>'}
