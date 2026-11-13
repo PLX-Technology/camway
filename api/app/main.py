@@ -574,7 +574,10 @@ COOKIE_NAME = "camway_session"
 # /live, muro, fotogramas, WHEP, detecciones). Las acciones de ADMIN siguen
 # exigiendo login real. Seguro porque solo el localhost de esa PC lo alcanza.
 KIOSK = os.environ.get("CAMWAY_KIOSK", "").strip().lower() in ("1", "true", "yes", "si")
-_KIOSK_USER = {"id": -1, "username": "kiosko", "role": "viewer", "cameras": None, "_kiosk": True}
+# «Ve todas las cámaras» NO se expresa con cameras=None (rompía set(...) y listas):
+# `cameras` es siempre una lista y `_kiosk` es la marca; todo el código pregunta
+# por `_user_sees_all(user)` y nunca por `user["cameras"]` directamente.
+_KIOSK_USER = {"id": -1, "username": "kiosko", "role": "viewer", "cameras": [], "_kiosk": True}
 
 # Rutas sin sesión: estáticos, login, y las que consumen los contenedores
 # internos (detector y el proxy Blue Iris que jala MediaMTX).
@@ -664,19 +667,23 @@ async def auth_gate(request: Request, call_next):
     return await call_next(request)
 
 
+def _user_sees_all(user: Optional[dict]) -> bool:
+    """Admin y kiosko local ven todas las cámaras; el resto, solo las asignadas."""
+    return bool(user) and (user["role"] == "admin" or bool(user.get("_kiosk")))
+
+
 def _user_allows(request: Request, device_id: str) -> bool:
     u = getattr(request.state, "user", None)
     if not u:
         return False
-    if u["role"] == "admin" or u.get("_kiosk"):   # kiosko local ve todas
+    if _user_sees_all(u):
         return True
     return device_id in set(u.get("cameras") or [])
 
 
 def _sees_all(request: Request) -> bool:
     """Admin y kiosko local ven todas las cámaras."""
-    u = getattr(request.state, "user", None)
-    return bool(u) and (u["role"] == "admin" or bool(u.get("_kiosk")))
+    return _user_sees_all(getattr(request.state, "user", None))
 
 
 def _require_camera(request: Request, device_id: str) -> None:
@@ -1232,12 +1239,12 @@ async def detections_stream(request: Request):
     """SSE que consume el mosaico para disparar alarmas sin correr el modelo.
     Un viewer solo recibe eventos de sus cámaras permitidas."""
     user = request.state.user
-    is_admin = user["role"] == "admin"
-    allowed = set(user.get("cameras", []))
+    sees_all = _user_sees_all(user)          # admin o kiosko (cameras no se mira)
+    allowed = set(user.get("cameras") or [])
     dev_of: dict[str, str] = {}   # stream_id -> device_id (cache)
 
     def visible(stream_id: str) -> bool:
-        if is_admin:
+        if sees_all:
             return True
         did = dev_of.get(stream_id)
         if did is None:
@@ -2221,7 +2228,7 @@ async def talk_ws(ws: WebSocket, stream_id: str):
         return
     # Auth por cookie (el middleware HTTP no corre en WebSockets).
     user = store.session_user(ws.cookies.get(COOKIE_NAME, ""))
-    if not user or (user["role"] != "admin" and s["device_id"] not in set(user.get("cameras", []))):
+    if not user or (user["role"] != "admin" and s["device_id"] not in set(user.get("cameras") or [])):
         await ws.close(code=4403)
         return
     cfg = _talk_cfg(s["device_id"])

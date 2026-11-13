@@ -224,7 +224,7 @@ def role_user(role: str):
     return next(u for u in DATA["users"] if u["id"] == uid)
 
 
-KIOSK_USER = {"id": -1, "username": "kiosko", "role": "viewer", "cameras": None,
+KIOSK_USER = {"id": -1, "username": "kiosko", "role": "viewer", "cameras": [],
               "_kiosk": True}
 
 
