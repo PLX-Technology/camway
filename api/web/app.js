@@ -2475,8 +2475,7 @@ function waStopTimers() { waTimers.forEach(clearInterval); waTimers = []; }
 function waCloseModal() {
   waStopTimers();
   $("#waModal").hidden = true;
-  loadWaCard();
-  loadAlertPanel();
+  loadAlertPanel();   // refresca también la tarjeta de WhatsApp
 }
 
 async function waRefreshQr() {
@@ -2540,13 +2539,8 @@ $("#waUnlink").addEventListener("click", async () => {
     await api("/api/settings/whatsapp/unlink", { method: "POST" });
     toast("Dispositivo desvinculado");
   } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
-  loadWaCard(); loadAlertPanel();
+  loadAlertPanel();   // refresca también la tarjeta de WhatsApp
 });
-
-setInterval(() => {
-  const v = $("#view-ajustes");
-  if (v && v.classList.contains("active") && $("#waModal").hidden) { loadWaCard(); loadAlertPanel(); }
-}, 15000);
 
 $("#btnSiteSave").addEventListener("click", async () => {
   const name = $("#siteName").value.trim();
@@ -2620,23 +2614,58 @@ async function loadHealth() {
   $("#hsCont").hidden = !h.containers.length;
 }
 
-setInterval(() => {
+// Sondeo único de Ajustes. Solo trabaja si la vista Ajustes está activa y la
+// pestaña del navegador visible (en Mosaico no hay peticiones de Ajustes).
+//   · salud del equipo: cada 5 s (solo admin; loadHealth lo comprueba)
+//   · WhatsApp + destinatarios + log: cada 15 s, UNA consulta de WhatsApp por
+//     ciclo (loadAlertPanel ya llama a loadWaCard) y sin pisar el modal de
+//     vinculación, que tiene su propio sondeo.
+const SETTINGS_TICK_MS = 5000;
+const ALERTS_EVERY_MS = 15000;
+let lastAlertsPoll = 0;
+
+function settingsPollActive() {
   const v = $("#view-ajustes");
-  if (v && v.classList.contains("active") && !document.hidden) loadHealth();
-}, 5000);
+  return !!(v && v.classList.contains("active")) && !document.hidden;
+}
+
+function settingsPollTick(force = false) {
+  if (!settingsPollActive()) return;
+  loadHealth();
+  const now = Date.now();
+  if ((force || now - lastAlertsPoll >= ALERTS_EVERY_MS - 500) && $("#waModal").hidden) {
+    loadAlertPanel({ poll: true });
+  }
+}
+setInterval(settingsPollTick, SETTINGS_TICK_MS);
+// Al volver a la pestaña del navegador, se pone al día enseguida.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) settingsPollTick(true); });
 
 // ---- panel de destinatarios (Ajustes) ----
 function fmtPhone(p) { return "+" + p; }
 
-async function loadAlertPanel() {
+// Firma de lo que se pinta en la lista: si no cambió, no se reconstruye.
+let alertPanelSig = "";
+let alertPanelBusy = false;
+
+// opts.poll = llamada del sondeo periódico: no repinta si nada cambió ni
+// mientras el usuario tiene el foco dentro de la lista (lo haría perder).
+async function loadAlertPanel(opts = {}) {
   const panel = $("#panelAlertas");
   if (!panel) return;
   panel.hidden = !canAlerts();
   if (!canAlerts()) return;
+  if (opts.poll && alertPanelBusy) return;   // la anterior sigue en vuelo
+  lastAlertsPoll = Date.now();               // cuenta cualquier carga para el ciclo de 15 s
+  alertPanelBusy = true;
+  try { await paintAlertPanel(opts); } finally { alertPanelBusy = false; }
+}
+
+async function paintAlertPanel(opts) {
+  loadWaCard();   // única consulta de WhatsApp por ciclo
   let a;
   try { a = await api("/api/settings/alerts"); } catch (_) { return; }
   const act = a.recipients.filter((r) => r.enabled).length;
-  loadWaCard();
   const waWarn = a.wa_state && a.wa_state !== "open" && a.wa_state !== "unconfigured"
     ? "⚠ WhatsApp sin dispositivo vinculado: las alertas esperan en cola. Avisa al administrador. " : "";
   $("#alStatus").textContent = waWarn + (!a.channels.whatsapp && !a.channels.email
@@ -2644,6 +2673,9 @@ async function loadAlertPanel() {
     : `✔ ${act} número(s) activo(s)` + (a.channels.group ? " + un grupo fijo del servidor" : "") +
       (a.pending ? ` · ${a.pending} aviso(s) en cola esperando enlace` : ""));
   const list = $("#alList");
+  const sig = JSON.stringify([a.recipients, (a.log || []).slice(0, 10), a.labels]);
+  if (opts.poll && (sig === alertPanelSig || list.contains(document.activeElement))) return;
+  alertPanelSig = sig;
   list.innerHTML = "";
   if (!a.recipients.length) {
     const li = document.createElement("li");
