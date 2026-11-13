@@ -804,13 +804,23 @@ function startWallFeeds() {
   else startSnapRefresh();
 }
 
-// Detiene refresco, gobernadores y WebRTC SIN destruir las tejas.
+// ¿Esta teja necesita su vídeo en vivo para la IA del navegador? (con el
+// detector del servidor activo, no: él procesa y el navegador solo recibe SSE.)
+function keepLiveForAi(c) {
+  return !state.serverDetection && !!(c.config && c.config.enabled);
+}
+
+// Detiene refresco, gobernadores y WebRTC SIN destruir las tejas. Con el muro
+// solo TAPADO (otra pestaña / DVR) las tejas en vivo con IA del navegador se
+// conservan: la IA sigue detectando (decisión del usuario). Con «Pausar» manual
+// se corta todo.
 function suspendWall() {
   wallRunning = false;
   stopSnapRefresh();
   if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
   if (qTimer) { clearInterval(qTimer); qTimer = null; }
-  state.tiles.forEach((c) => dropLive(c));
+  const conservarIa = wallOffscreen() && !wallUserPaused;
+  state.tiles.forEach((c) => { if (!(conservarIa && keepLiveForAi(c))) dropLive(c); });
 }
 
 function resumeWall() {
@@ -2119,7 +2129,8 @@ function refDims(ctrl) {
 // sigue visible y refrescándose hasta que el vídeo tiene su primer frame, para
 // que no haya pantalla negra durante el arranque de WebRTC.
 function goLive(ctrl) {
-  if (ctrl.live || wallOffscreen()) return;   // con el muro tapado no se abre vídeo
+  // Con el muro tapado no se abre vídeo, salvo que la IA del navegador lo necesite.
+  if (ctrl.live || (wallOffscreen() && !keepLiveForAi(ctrl))) return;
   ctrl.live = true;
   ctrl.videoReady = false;
   ctrl.el.classList.add("live");
@@ -3199,14 +3210,23 @@ function initZoneEditor() {
 
   $("#zoneCancel").addEventListener("click", closeZoneEditor);
 
-  $("#zoneSave").addEventListener("click", () => {
+  $("#zoneSave").addEventListener("click", async () => {
     const canvas = $("#zoneCanvas");
+    const previa = zoneCtrl.config.zone;
     if (zonePoints.length >= 3) {
       zoneCtrl.config.zone = zonePoints.map(([x, y]) => [x / canvas.width, y / canvas.height]);
     } else {
       zoneCtrl.config.zone = null;
     }
-    saveAiConfig(zoneCtrl.streamId, zoneCtrl.config);
+    try {
+      await saveAiConfig(zoneCtrl.streamId, zoneCtrl.config);
+    } catch (err) {
+      // El servidor no la guardó: se conserva la zona anterior y el editor sigue
+      // abierto para reintentar.
+      zoneCtrl.config.zone = previa;
+      toast("No se guardó la zona: " + err.message, true);
+      return;
+    }
     refreshZoneTag(zoneCtrl);
     updateZoneState(zoneCtrl);
     closeZoneEditor();
@@ -3951,7 +3971,6 @@ function enterZoneKioskChrome() {
   setInterval(pollHealth, 8000);
   await loadSettings();
   if (!ZONE_ONLY && isAdmin()) { await loadDevices(); loadUsers(); }
-  if (!ZONE_ONLY) loadAlertPanel();
   // Primero se decide si arranca el DVR (autoStart marca body.dvr-open antes de
   // volver); luego se carga el muro, que solo corre si no hay DVR encima.
   if (!ZONE_ONLY) await window.CamWayDVR?.autoStart?.();
