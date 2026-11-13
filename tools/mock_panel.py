@@ -438,8 +438,7 @@ class Handler(BaseHTTPRequestHandler):
         self.json({"detail": detail}, status)
 
     def body_json(self) -> dict:
-        n = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(n) if n else b""
+        raw = self.body_raw()
         if not raw:
             return {}
         try:
@@ -449,8 +448,19 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def body_raw(self) -> bytes:
-        n = int(self.headers.get("Content-Length") or 0)
+        """Lee (una sola vez) el cuerpo según Content-Length. Si un manejador no lo
+        lee, `_drain_body` lo descarta al final: con HTTP/1.1 keep-alive un cuerpo
+        sin leer queda en el socket y la petición siguiente llega corrupta."""
+        n, self._unread = self._unread, 0
         return self.rfile.read(n) if n else b""
+
+    def _drain_body(self):
+        if self._unread:
+            n, self._unread = self._unread, 0
+            try:
+                self.rfile.read(n)
+            except OSError:
+                pass
 
     # --- despacho ---------------------------------------------------------
     def do_GET(self): self._dispatch("GET")
@@ -466,6 +476,16 @@ class Handler(BaseHTTPRequestHandler):
             "Access-Control-Allow-Headers": "*"})
 
     def _dispatch(self, method: str):
+        try:
+            self._unread = max(0, int(self.headers.get("Content-Length") or 0))
+        except ValueError:
+            self._unread = 0
+        try:
+            self._dispatch_inner(method)
+        finally:
+            self._drain_body()          # POST/PUT/PATCH/DELETE/401/403/404: siempre
+
+    def _dispatch_inner(self, method: str):
         u = urlparse(self.path)
         path = u.path
         self.query = {k: v[-1] for k, v in parse_qs(u.query).items()}
