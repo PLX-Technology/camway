@@ -958,6 +958,11 @@ function makeTile(tile) {
   el.className = "tile";
   el.dataset.streamId = tile.stream_id;
   el.draggable = true;
+  // Accesible por teclado: se enfoca con Tab y Enter la amplía/restaura (igual
+  // que el doble clic); Escape restaura una teja ampliada dentro de la página.
+  el.tabIndex = 0;
+  el.setAttribute("role", "group");
+  el.setAttribute("aria-label", `Cámara ${tile.title}`);
   el.innerHTML = `
     <img class="snap" alt="">
     <video playsinline muted></video>
@@ -967,23 +972,23 @@ function makeTile(tile) {
     <div class="schedtag">⏰ horario</div>
     <div class="tilestate"><div class="spinner"></div><span>en espera</span></div>
     <div class="ptzpad" hidden>
-      <button class="ptzbtn up" data-ptz="up" title="Arriba">▲</button>
-      <button class="ptzbtn left" data-ptz="left" title="Izquierda">◀</button>
-      <button class="ptzbtn right" data-ptz="right" title="Derecha">▶</button>
-      <button class="ptzbtn down" data-ptz="down" title="Abajo">▼</button>
-      ${tile.zoom ? `<button class="ptzbtn zoomin" data-ptz="zoomin" title="Acercar (zoom +)">＋</button>
-      <button class="ptzbtn zoomout" data-ptz="zoomout" title="Alejar (zoom −)">－</button>` : ""}
+      <button class="ptzbtn up" data-ptz="up" title="Arriba" aria-label="Mover cámara arriba">▲</button>
+      <button class="ptzbtn left" data-ptz="left" title="Izquierda" aria-label="Mover cámara a la izquierda">◀</button>
+      <button class="ptzbtn right" data-ptz="right" title="Derecha" aria-label="Mover cámara a la derecha">▶</button>
+      <button class="ptzbtn down" data-ptz="down" title="Abajo" aria-label="Mover cámara abajo">▼</button>
+      ${tile.zoom ? `<button class="ptzbtn zoomin" data-ptz="zoomin" title="Acercar (zoom +)" aria-label="Acercar (zoom óptico)">＋</button>
+      <button class="ptzbtn zoomout" data-ptz="zoomout" title="Alejar (zoom −)" aria-label="Alejar (zoom óptico)">－</button>` : ""}
     </div>
     <div class="tilebar">
-      <span class="draghandle" title="Arrastrar">⠿</span>
+      <span class="draghandle" title="Arrastrar" aria-hidden="true">⠿</span>
       <span class="t">${esc(tile.title)}</span>
       <span class="chip">${esc(tile.codec)}</span>
-      ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio">🔇</button>` : ""}
-      ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)">🎙️</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local">⏺</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)">⚡</button>` : ""}
-      ${isAdmin() ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}">🕹</button>` : ""}
-      <button class="ghost small ai" data-ai title="Comportamiento IA"><span class="dotai"></span>IA</button>
+      ${tile.audio ? `<button class="ghost small" data-mute title="Oír audio" aria-label="Oír el audio de la cámara" aria-pressed="false">🔇</button>` : ""}
+      ${tile.talk ? `<button class="ghost small" data-talk title="Hablar (mantén pulsado)" aria-label="Hablar por el altavoz de la cámara (mantén pulsado)">🎙️</button>` : ""}
+      ${isAdmin() ? `<button class="ghost small rec${tile.rec ? " recon" : ""}" data-rec title="Grabación local" aria-label="Grabación local de la cámara">⏺</button>` : ""}
+      ${isAdmin() ? `<button class="ghost small" data-optimize title="Optimizar tiempo real (keyframe 1s por ONVIF)" aria-label="Optimizar para tiempo real">⚡</button>` : ""}
+      ${isAdmin() ? `<button class="ghost small ptzcfg${tile.ptz ? " ptzon" : ""}" data-ptzcfg title="${tile.ptz ? "PTZ activado (clic para desactivar)" : "Activar PTZ (ONVIF)"}" aria-label="Activar o desactivar el PTZ">🕹</button>` : ""}
+      <button class="ghost small ai" data-ai title="Comportamiento IA" aria-label="Comportamiento IA de la cámara"><span class="dotai"></span>IA</button>
       <button class="ghost small" data-play>Ver</button>
     </div>`;
 
@@ -1011,12 +1016,15 @@ function makeTile(tile) {
         state.players.forEach((p, sid) => {  // silenciar las demás
           if (sid !== tile.stream_id && p.video) { p.video.muted = true; }
         });
-        document.querySelectorAll("[data-mute]").forEach((b) => (b.textContent = "🔇"));
+        document.querySelectorAll("[data-mute]").forEach((b) => {
+          b.textContent = "🔇"; b.setAttribute("aria-pressed", "false");
+        });
         if (!player.active) { const c = state.tiles.get(tile.stream_id); if (c) goLive(c); }
       }
       video.muted = !on;
       video.volume = 1;
       muteBtn.textContent = on ? "🔊" : "🔇";
+      muteBtn.setAttribute("aria-pressed", on ? "true" : "false");
     });
   }
 
@@ -1044,6 +1052,7 @@ function makeTile(tile) {
       stateEl.querySelector(".spinner").style.display = trabajando ? "" : "none";
     }
     btn.textContent = player.active ? "Parar" : "Ver";
+    btn.setAttribute("aria-label", `${player.active ? "Parar el vídeo de" : "Ver en vivo"} ${tile.title}`);
   };
   player.onState = setState;
   state.players.set(tile.stream_id, player);
@@ -1053,7 +1062,7 @@ function makeTile(tile) {
     if (!c) return;
     if (c.live) goSnap(c); else goLive(c);
   });
-  el.addEventListener("dblclick", () => {
+  const toggleEnlarge = () => {
     const c = state.tiles.get(tile.stream_id);
     if (!c) return;
     if (c.el.classList.contains("maximized")) {
@@ -1066,6 +1075,12 @@ function makeTile(tile) {
     } else {
       toggleFullscreen(el);    // vista normal: pantalla completa del SO
     }
+  };
+  el.addEventListener("dblclick", toggleEnlarge);
+  el.addEventListener("keydown", (e) => {
+    if (e.target !== el) return;               // Enter sobre un botón hace su propia acción
+    if (e.key === "Enter") { e.preventDefault(); toggleEnlarge(); }
+    else if (e.key === "Escape" && el.classList.contains("maximized")) { e.preventDefault(); toggleEnlarge(); }
   });
 
   // Arrastre de la teja (mueve el nodo, el video no se corta). En vista
@@ -1270,7 +1285,7 @@ function makeZoneBox(zone) {
   const isDefault = zone.id === "default";
   box.innerHTML = `
     <div class="zonehead">
-      <input class="zname" spellcheck="false">
+      <input class="zname" spellcheck="false" aria-label="Nombre de la zona">
       <span class="zcount"></span>
       <span class="zspacer"></span>
       ${isDefault ? "" : '<button class="ghost small" data-zfit title="Cuando está activo, esta zona NO aparece en «Ajustar a pantalla» del monitor principal; solo en su propia ventana.">▦ Solo su ventana</button>'}
@@ -1374,8 +1389,8 @@ function updateZoneCount(box) {
   box.querySelector(".zcount").textContent = n === 1 ? "1 cámara" : `${n} cámaras`;
 }
 
-function addZone() {
-  const name = prompt("Nombre de la zona", "Nueva zona");
+async function addZone() {
+  const name = await uiPrompt("Nombre de la zona", { value: "Nueva zona", okLabel: "Crear" });
   if (name === null) return;
   const box = makeZoneBox({ id: "z" + Date.now().toString(36), name: name || "Zona", cams: [] });
   $("#wall").appendChild(box);
