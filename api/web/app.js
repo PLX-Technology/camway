@@ -274,7 +274,8 @@ $("#btnStop").addEventListener("click", async () => {
 
 $("#btnClearAll").addEventListener("click", async () => {
   if (state.devices.size === 0) return;
-  if (!confirm(`¿Borrar los ${state.devices.size} equipos del inventario? No se puede deshacer; las grabaciones ya guardadas no se tocan.`)) return;
+  if (!(await uiConfirm(`¿Borrar los ${state.devices.size} equipos del inventario? No se puede deshacer; las grabaciones ya guardadas no se tocan.`,
+        { okLabel: "Borrar todo", danger: true }))) return;
   try {
     const r = await api("/api/devices", { method: "DELETE" });
     toast(`${r.removed} equipos borrados`);
@@ -291,7 +292,8 @@ function openEvents() {
   state.sse = sse;
 
   sse.onmessage = (ev) => {
-    const e = JSON.parse(ev.data);
+    let e;
+    try { e = JSON.parse(ev.data); } catch (_) { return; }   // evento ilegible: se ignora
 
     if (e.stage === "error") {
       toast(e.message, true);
@@ -329,7 +331,13 @@ function openEvents() {
     }
   };
 
-  sse.onerror = () => { sse.close(); state.sse = null; };
+  // Si se corta la conexión a media exploración, no dejar la UI «escaneando».
+  sse.onerror = () => {
+    sse.close();
+    if (state.sse === sse) state.sse = null;
+    setScanning(false);
+    toast("Se perdió la conexión con el escaneo; revisa el inventario o vuelve a lanzarlo", true);
+  };
 }
 
 // --------------------------------------------------------------- equipos
@@ -362,7 +370,7 @@ function renderDevice(dev, animate) {
 
   const badges = [];
   if (dev.vendor && dev.vendor !== "desconocido")
-    badges.push(`<span class="badge vendor">${dev.vendor}</span>`);
+    badges.push(`<span class="badge vendor">${esc(dev.vendor)}</span>`);
   if (dev.kind === "nvr")
     badges.push(`<span class="badge nvr">DVR/NVR · ${dev.streams.length} canales</span>`);
   badges.push(dev.needs_auth
@@ -374,19 +382,19 @@ function renderDevice(dev, animate) {
   card.innerHTML = `
     <div class="cardhead">
       <div class="cardtitle">
-        <span class="host">${dev.host}:${dev.port}</span>
-        <span class="name" data-name>${dev.name || ""}</span>
-        <button class="ghost small" data-act="rename" style="margin-left:auto">Nombrar</button>
+        <span class="host">${esc(dev.host)}:${esc(dev.port)}</span>
+        <span class="name" data-name>${esc(dev.name)}</span>
+        <button class="ghost small btnpush" data-act="rename">Nombrar</button>
         <button class="ghost small" data-act="osd">OSD</button>
         <button class="ghost small" data-act="forget">Olvidar</button>
       </div>
-      <div class="cardsub">${dev.server || "sin banner"}</div>
+      <div class="cardsub">${dev.server ? esc(dev.server) : "sin banner"}</div>
       <div class="badges">${badges.join("")}</div>
     </div>
     <ul class="streams">
       ${dev.streams.map((s) => renderStream(dev, s)).join("")}
     </ul>
-    ${dev.error ? `<div class="carderr">${dev.error}</div>` : ""}
+    ${dev.error ? `<div class="carderr">${esc(dev.error)}</div>` : ""}
     ${(dev.needs_auth && dev.streams.length === 0) ? `
       <div class="authform">
         <div class="authrow">
@@ -399,24 +407,28 @@ function renderDevice(dev, animate) {
   `;
 
   card.querySelector('[data-act="rename"]').addEventListener("click", async () => {
-    const name = prompt("Nombre para este equipo", dev.name || "");
+    const name = await uiPrompt("Nombre para este equipo", { value: dev.name || "", okLabel: "Guardar" });
     if (name === null) return;
-    await api(`/api/devices/${dev.id}`, {
-      method: "PATCH", body: JSON.stringify({ name }),
-    });
-    dev.name = name;
-    card.querySelector("[data-name]").textContent = name;
+    try {
+      await api(`/api/devices/${dev.id}`, {
+        method: "PATCH", body: JSON.stringify({ name }),
+      });
+      dev.name = name;
+      card.querySelector("[data-name]").textContent = name;
+    } catch (err) { toast("No se pudo renombrar: " + err.message, true); }
   });
 
   card.querySelector('[data-act="osd"]').addEventListener("click", () => openOsdModal(dev));
 
   card.querySelector('[data-act="forget"]').addEventListener("click", async () => {
-    if (!confirm(`¿Quitar ${dev.host} del inventario?`)) return;
-    await api(`/api/devices/${dev.id}`, { method: "DELETE" });
-    state.devices.delete(dev.id);
-    card.remove();
-    updateEmpty();
-    pollHealth();
+    if (!(await uiConfirm(`¿Quitar ${dev.host} del inventario?`, { okLabel: "Quitar", danger: true }))) return;
+    try {
+      await api(`/api/devices/${dev.id}`, { method: "DELETE" });
+      state.devices.delete(dev.id);
+      card.remove();
+      updateEmpty();
+      pollHealth();
+    } catch (err) { toast("No se pudo quitar el equipo: " + err.message, true); }
   });
 
   card.querySelectorAll("[data-publish]").forEach((btn) => {
@@ -477,24 +489,24 @@ function renderStream(dev, s) {
   return `
     <li class="streamrow">
       ${sid
-        ? `<img class="thumb" data-snap data-sid="${sid}" data-auto="0"
+        ? `<img class="thumb" data-snap data-sid="${esc(sid)}" data-auto="0"
                 alt="miniatura" title="Pulsa para capturar un fotograma"
                 src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">`
         : `<div class="thumb vacia">sin guardar</div>`}
       <div class="streaminfo">
         <div class="top">
-          <span class="path" title="${s.url}">${s.path}</span>
-          <span class="chip ${codecClass}">${s.codec}</span>
+          <span class="path" title="${esc(s.url)}">${esc(s.path)}</span>
+          <span class="chip ${codecClass}">${esc(s.codec)}</span>
           ${s.audio_codec ? `<span class="chip">audio</span>` : ""}
         </div>
         <div class="meta">
-          ${dims(s)}${s.profile ? " · " + s.profile : ""} · ${s.label}
+          ${esc(dims(s))}${s.profile ? " · " + esc(s.profile) : ""} · ${esc(s.label)}
           ${s.webrtc_ready ? "" : " · necesita transcodificar para WebRTC"}
         </div>
       </div>
       ${publishable
         ? `<button class="${pub ? "ghost" : "primary"} small"
-                   data-publish data-sid="${sid}" data-pub="${pub ? 1 : 0}">
+                   data-publish data-sid="${esc(sid)}" data-pub="${pub ? 1 : 0}">
              ${pub ? "Quitar" : "Publicar"}
            </button>`
         : ""}
@@ -1719,16 +1731,18 @@ function loadAiConfig(streamId) {
   }
 }
 
-function saveAiConfig(streamId, cfg) {
-  try { localStorage.setItem(AI_KEY + streamId, JSON.stringify(cfg)); } catch (_) {}
-  // Fuente de verdad para el detector server-side.
-  api(`/api/streams/${streamId}/ai`, {
+// Guarda la config en el servidor (fuente de verdad del detector server-side)
+// y, solo si la aceptó, en este navegador. La promesa RECHAZA si el servidor no
+// la guardó: quien la llama decide cómo avisar (nada de «IA activada» falso).
+async function saveAiConfig(streamId, cfg) {
+  await api(`/api/streams/${encodeURIComponent(streamId)}/ai`, {
     method: "PUT",
     body: JSON.stringify({
       enabled: cfg.enabled, target: cfg.target, min_score: cfg.minScore,
       action: cfg.action, zone: cfg.zone, schedule: cfg.schedule,
     }),
-  }).catch(() => {});
+  });
+  try { localStorage.setItem(AI_KEY + streamId, JSON.stringify(cfg)); } catch (_) {}
 }
 
 function serverCfgToLocal(s, streamId) {
@@ -1777,6 +1791,38 @@ function refreshAiButton(ctrl) {
   ctrl.aiBtn.classList.toggle("on", !!ctrl.config.enabled);
 }
 
+// Carga un <script> una sola vez; la promesa se comparte entre llamadas.
+const scriptLoads = new Map();
+function loadScriptOnce(src) {
+  if (!scriptLoads.has(src)) {
+    scriptLoads.set(src, new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = src;
+      el.onload = resolve;
+      el.onerror = () => {
+        scriptLoads.delete(src);   // permite reintentar
+        el.remove();
+        reject(new Error("no cargó TensorFlow.js (¿sin conexión con el servidor?)"));
+      };
+      document.head.appendChild(el);
+    }));
+  }
+  return scriptLoads.get(src);
+}
+
+// tf.min.js primero (coco-ssd lo necesita), luego coco-ssd. Si ya están en la
+// página (p. ej. un index.html que aún los incluya) no se vuelven a pedir.
+let tfLoading = null;
+function loadTensorflow() {
+  if (typeof cocoSsd !== "undefined") return Promise.resolve();
+  if (!tfLoading) {
+    tfLoading = (typeof tf !== "undefined" ? Promise.resolve() : loadScriptOnce("/static/vendor/tf.min.js"))
+      .then(() => loadScriptOnce("/static/vendor/coco-ssd.min.js"))
+      .catch((err) => { tfLoading = null; throw err; });
+  }
+  return tfLoading;
+}
+
 // El motor comparte un solo modelo y recorre las tejas activas en ronda, para
 // no ahogar el navegador corriendo la detección de todas a la vez.
 const aiEngine = {
@@ -1790,11 +1836,13 @@ const aiEngine = {
   async ensureModel() {
     if (this.model) return this.model;
     if (!this.loading) {
-      if (typeof cocoSsd === "undefined") {
-        throw new Error("no cargó TensorFlow.js (¿sin internet?)");
-      }
-      // Modelo alojado local (no baja de Google): 100% offline.
-      this.loading = cocoSsd.load({ modelUrl: "/static/vendor/coco-ssd/model.json" });
+      // TensorFlow.js y coco-ssd (~15 MB) se bajan solo cuando alguien activa la
+      // IA del navegador, una única vez (promesa compartida). Si falla, se
+      // descarta la promesa para poder reintentar.
+      this.loading = loadTensorflow()
+        // Modelo alojado local (no baja de Google): 100% offline.
+        .then(() => cocoSsd.load({ modelUrl: "/static/vendor/coco-ssd/model.json" }))
+        .catch((err) => { this.loading = null; throw err; });
     }
     this.model = await this.loading;
     return this.model;
@@ -1856,10 +1904,9 @@ const aiEngine = {
 // Procesa detecciones (vengan del modelo local o del detector server-side):
 // pinta las cajas, filtra por clase/umbral/zona, maneja el reconocimiento y
 // dispara la alarma. `preds` = [{class, score, bbox:[x,y,w,h en px del frame]}].
-// serverAlarm: cuando viene del detector server-side, es true/false según SU
-// rastreo (que sobrevive a recargas del navegador). undefined = modelo local
-// (respaldo), y entonces el rastreo lo hace el navegador.
-function processDetections(ctrl, preds, serverAlarm) {
+// El rastreo (alarma «solo si es nuevo») lo hace siempre el navegador, también
+// con las cajas crudas que llegan del detector server-side.
+function processDetections(ctrl, preds) {
   if (!ctrl.config.enabled) { clearOverlay(ctrl); return; }   // IA apagada: nada de cajas
   if (!isWithinSchedule(ctrl.config.schedule)) { clearOverlay(ctrl); return; }
 
@@ -1882,18 +1929,6 @@ function processDetections(ctrl, preds, serverAlarm) {
   });
 
   const now = Date.now();
-
-  // --- Camino server-side: la decisión de alarma la trae el evento ---
-  if (serverAlarm !== undefined) {
-    if (!hits.length) return;
-    // OJO: solo un disparo real (serverAlarm) refresca lastHit. Si el objeto
-    // sigue a la vista pero quieto, NO se revive la alarma; así la cámara
-    // ampliada vuelve a fotograma tras AI_CLEAR_MS aunque el objeto siga ahí
-    // (si se mueve otra vez, onDetection vuelve a dispararla).
-    if (serverAlarm) onDetection(ctrl, hits);              // algo nuevo/movido
-    else if (ctrl.alarmed) updateAlertLabel(ctrl, hits);   // sigue ahí: solo refresca etiqueta
-    return;
-  }
 
   // --- Rastreo en el navegador (por usuario), por IoU ---
   // Se empareja cada detección con el track existente que MÁS se solapa (IoU).
@@ -2578,8 +2613,7 @@ function waStopTimers() { waTimers.forEach(clearInterval); waTimers = []; }
 function waCloseModal() {
   waStopTimers();
   $("#waModal").hidden = true;
-  loadWaCard();
-  loadAlertPanel();
+  loadAlertPanel();   // refresca también la tarjeta de WhatsApp
 }
 
 async function waRefreshQr() {
@@ -2635,21 +2669,17 @@ $("#waPair").addEventListener("click", async () => {
 });
 
 $("#waUnlink").addEventListener("click", async () => {
-  if (!confirm("¿Desvincular el WhatsApp que envía las alertas?\n\n" +
+  if (!(await uiConfirm("¿Desvincular el WhatsApp que envía las alertas?\n\n" +
       "Dejarán de salir avisos hasta que vincules otro dispositivo " +
-      "(los pendientes esperan en cola). Los números destinatarios y las reglas se conservan.")) return;
+      "(los pendientes esperan en cola). Los números destinatarios y las reglas se conservan.",
+      { okLabel: "Desvincular", danger: true }))) return;
   const btn = $("#waUnlink"); btn.disabled = true;
   try {
     await api("/api/settings/whatsapp/unlink", { method: "POST" });
     toast("Dispositivo desvinculado");
   } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
-  loadWaCard(); loadAlertPanel();
+  loadAlertPanel();   // refresca también la tarjeta de WhatsApp
 });
-
-setInterval(() => {
-  const v = $("#view-ajustes");
-  if (v && v.classList.contains("active") && $("#waModal").hidden) { loadWaCard(); loadAlertPanel(); }
-}, 15000);
 
 $("#btnSiteSave").addEventListener("click", async () => {
   const name = $("#siteName").value.trim();
@@ -2723,23 +2753,58 @@ async function loadHealth() {
   $("#hsCont").hidden = !h.containers.length;
 }
 
-setInterval(() => {
+// Sondeo único de Ajustes. Solo trabaja si la vista Ajustes está activa y la
+// pestaña del navegador visible (en Mosaico no hay peticiones de Ajustes).
+//   · salud del equipo: cada 5 s (solo admin; loadHealth lo comprueba)
+//   · WhatsApp + destinatarios + log: cada 15 s, UNA consulta de WhatsApp por
+//     ciclo (loadAlertPanel ya llama a loadWaCard) y sin pisar el modal de
+//     vinculación, que tiene su propio sondeo.
+const SETTINGS_TICK_MS = 5000;
+const ALERTS_EVERY_MS = 15000;
+let lastAlertsPoll = 0;
+
+function settingsPollActive() {
   const v = $("#view-ajustes");
-  if (v && v.classList.contains("active") && !document.hidden) loadHealth();
-}, 5000);
+  return !!(v && v.classList.contains("active")) && !document.hidden;
+}
+
+function settingsPollTick(force = false) {
+  if (!settingsPollActive()) return;
+  loadHealth();
+  const now = Date.now();
+  if ((force || now - lastAlertsPoll >= ALERTS_EVERY_MS - 500) && $("#waModal").hidden) {
+    loadAlertPanel({ poll: true });
+  }
+}
+setInterval(settingsPollTick, SETTINGS_TICK_MS);
+// Al volver a la pestaña del navegador, se pone al día enseguida.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) settingsPollTick(true); });
 
 // ---- panel de destinatarios (Ajustes) ----
 function fmtPhone(p) { return "+" + p; }
 
-async function loadAlertPanel() {
+// Firma de lo que se pinta en la lista: si no cambió, no se reconstruye.
+let alertPanelSig = "";
+let alertPanelBusy = false;
+
+// opts.poll = llamada del sondeo periódico: no repinta si nada cambió ni
+// mientras el usuario tiene el foco dentro de la lista (lo haría perder).
+async function loadAlertPanel(opts = {}) {
   const panel = $("#panelAlertas");
   if (!panel) return;
   panel.hidden = !canAlerts();
   if (!canAlerts()) return;
+  if (opts.poll && alertPanelBusy) return;   // la anterior sigue en vuelo
+  lastAlertsPoll = Date.now();               // cuenta cualquier carga para el ciclo de 15 s
+  alertPanelBusy = true;
+  try { await paintAlertPanel(opts); } finally { alertPanelBusy = false; }
+}
+
+async function paintAlertPanel(opts) {
+  loadWaCard();   // única consulta de WhatsApp por ciclo
   let a;
   try { a = await api("/api/settings/alerts"); } catch (_) { return; }
   const act = a.recipients.filter((r) => r.enabled).length;
-  loadWaCard();
   const waWarn = a.wa_state && a.wa_state !== "open" && a.wa_state !== "unconfigured"
     ? "⚠ WhatsApp sin dispositivo vinculado: las alertas esperan en cola. Avisa al administrador. " : "";
   $("#alStatus").textContent = waWarn + (!a.channels.whatsapp && !a.channels.email
@@ -2747,6 +2812,9 @@ async function loadAlertPanel() {
     : `✔ ${act} número(s) activo(s)` + (a.channels.group ? " + un grupo fijo del servidor" : "") +
       (a.pending ? ` · ${a.pending} aviso(s) en cola esperando enlace` : ""));
   const list = $("#alList");
+  const sig = JSON.stringify([a.recipients, (a.log || []).slice(0, 10), a.labels]);
+  if (opts.poll && (sig === alertPanelSig || list.contains(document.activeElement))) return;
+  alertPanelSig = sig;
   list.innerHTML = "";
   if (!a.recipients.length) {
     const li = document.createElement("li");
@@ -2776,7 +2844,7 @@ async function loadAlertPanel() {
     });
     const del = document.createElement("button"); del.className = "ghost small"; del.textContent = "Quitar";
     del.addEventListener("click", async () => {
-      if (!confirm(`¿Quitar a ${r.name} (${fmtPhone(r.phone)}) de las alertas?`)) return;
+      if (!(await uiConfirm(`¿Quitar a ${r.name} (${fmtPhone(r.phone)}) de las alertas?`, { okLabel: "Quitar", danger: true }))) return;
       try { await api(`/api/settings/alerts/recipients/${r.id}`, { method: "DELETE" }); loadAlertPanel(); }
       catch (e) { toast(e.message, true); }
     });
@@ -2939,7 +3007,10 @@ $("#aiModal").addEventListener("click", (e) => {
 $("#aiSave").addEventListener("click", async () => {
   if (!aiModalCtrl) return;
   const ctrl = aiModalCtrl;
-  ctrl.config = {
+  const btnSave = $("#aiSave");
+  if (btnSave.disabled) return;   // ya hay un guardado en curso
+  btnSave.disabled = true;
+  const next = {
     enabled: $("#aiEnabled").checked,
     target: $("#aiTarget").value,
     action: $("#aiAction").value,
@@ -2953,7 +3024,16 @@ $("#aiSave").addEventListener("click", async () => {
       end: $("#aiEnd").value,
     },
   };
-  saveAiConfig(ctrl.streamId, ctrl.config);
+  try {
+    await saveAiConfig(ctrl.streamId, next);
+  } catch (err) {
+    // El servidor no la guardó: la teja conserva su config anterior, no se
+    // anuncia «IA activada» y el modal queda abierto para reintentar.
+    toast("No se guardó la configuración de IA: " + err.message, true);
+    btnSave.disabled = false;
+    return;
+  }
+  ctrl.config = next;
   refreshAiButton(ctrl);
   refreshZoneTag(ctrl);
   refreshSchedTag(ctrl);
@@ -2979,8 +3059,9 @@ $("#aiSave").addEventListener("click", async () => {
       } catch (err) {
         toast(err.message, true);
         ctrl.config.enabled = false;
-        saveAiConfig(ctrl.streamId, ctrl.config);
         refreshAiButton(ctrl);
+        try { await saveAiConfig(ctrl.streamId, ctrl.config); }
+        catch (e2) { toast("No se pudo desactivar la IA en el servidor: " + e2.message, true); }
       } finally {
         btn.disabled = false;
         btn.textContent = "Guardar";
@@ -2990,6 +3071,7 @@ $("#aiSave").addEventListener("click", async () => {
     aiEngine.unregister(ctrl);
     toast(`IA desactivada en ${ctrl.title}`);
   }
+  btnSave.disabled = false;
   closeAiModal();
 });
 
@@ -3365,7 +3447,9 @@ $("#logoFile").addEventListener("change", async (e) => {
 });
 
 $("#btnLogoClear").addEventListener("click", async () => {
-  await api("/api/settings", { method: "POST", body: JSON.stringify({ logo: "" }) }).catch(() => {});
+  try {
+    await api("/api/settings", { method: "POST", body: JSON.stringify({ logo: "" }) });
+  } catch (err) { return toast("No se pudo quitar el logo: " + err.message, true); }
   state.logo = "";
   showLogoPreview("");
   $("#logoHint").textContent = "Logo quitado.";
@@ -3410,8 +3494,8 @@ async function loadRecDevices() {
   // menú con miniatura por cámara
   $("#recCamMenu").innerHTML = recDevices.map((d, i) => `
     <div class="ts-item" data-i="${i}">
-      <img src="${d.thumb || ""}" alt="" onerror="this.style.visibility='hidden'">
-      <span class="n">${d.name}</span>
+      <img src="${esc(d.thumb)}" alt="" onerror="this.style.visibility='hidden'">
+      <span class="n">${esc(d.name)}</span>
     </div>`).join("");
   $$("#recCamMenu .ts-item").forEach((el) =>
     el.addEventListener("click", () => { recSelectDevice(recDevices[+el.dataset.i]); loadClips(); }));
@@ -3484,7 +3568,7 @@ function localRecCard(dev, r) {
       <span class="play">▶</span>${tag}
       <span class="dur">${label}</span>
     </div>
-    <div class="recmeta"><div class="t">${fmtRecTime(r.mtime)}</div><div class="s">${fmtSize(r.size)}</div></div>`;
+    <div class="recmeta"><div class="t">${esc(fmtRecTime(r.mtime))}</div><div class="s">${esc(fmtSize(r.size))}</div></div>`;
   el.addEventListener("click", () =>
     playRecUrl(`${recSelected.name} — ${fmtRecTime(r.mtime)}`, url));
   return el;
@@ -3513,14 +3597,14 @@ function recCard(dev, c) {
   el.className = "reccard";
   const dur = (c.size || "").split("(")[0].trim();
   const alert = (c.flags & 2) ? '<span class="alert" title="Con alerta">🔔</span>' : "";
-  const thumb = `/api/recordings/${dev}/thumb?path=${encodeURIComponent(c.path)}`;
+  const thumb = `/api/recordings/${encodeURIComponent(dev)}/thumb?path=${encodeURIComponent(c.path)}`;
   el.innerHTML = `
     <div class="recthumb">
-      <img data-src="${thumb}" alt="" decoding="async" onerror="this.style.display='none'">
+      <img data-src="${esc(thumb)}" alt="" decoding="async" onerror="this.style.display='none'">
       <span class="play">▶</span>${alert}
-      <span class="dur">${dur}</span>
+      <span class="dur">${esc(dur)}</span>
     </div>
-    <div class="recmeta"><div class="t">${fmtClipTime(c.date)}</div><div class="s">${c.size || ""}</div></div>`;
+    <div class="recmeta"><div class="t">${esc(fmtClipTime(c.date))}</div><div class="s">${esc(c.size)}</div></div>`;
   el.addEventListener("click", () => openRecPlayer(dev, c));
   return el;
 }
@@ -3586,7 +3670,7 @@ async function openRecModal(deviceId, title, recBtn) {
   modal.innerHTML = `
     <div class="modalcard">
       <div class="modalhead">
-        <h3>Grabación local — ${title}</h3>
+        <h3>Grabación local — ${esc(title)}</h3>
         <button class="ghost small" data-close>Cerrar</button>
       </div>
       <div class="aibody">
@@ -3602,10 +3686,10 @@ async function openRecModal(deviceId, title, recBtn) {
             </select>
           </label>
           <label>Retención continuo (días)
-            <input type="number" id="recContDays" min="1" max="60" value="${cfg.cont_days || 3}">
+            <input type="number" id="recContDays" min="1" max="60" value="${esc(cfg.cont_days || 3)}">
           </label>
           <label id="recEvWrap">Retención clips de evento (días)
-            <input type="number" id="recEventDays" min="1" max="90" value="${cfg.event_days || 7}">
+            <input type="number" id="recEventDays" min="1" max="90" value="${esc(cfg.event_days || 7)}">
           </label>
         </div>
         <div class="reclist" id="recList2">
@@ -3625,7 +3709,7 @@ async function openRecModal(deviceId, title, recBtn) {
     row.className = "recrow";
     const tag = r.kind === "event" ? '<span class="evtag">evento</span>' : "";
     const url = `/api/recordings/${deviceId}/file?stream=${encodeURIComponent(r.stream)}&name=${encodeURIComponent(r.name)}&kind=${r.kind}`;
-    row.innerHTML = `<span class="rt">▶ ${fmtRecTime(r.mtime)} ${tag}</span><span class="rs">${fmtSize(r.size)}</span>`;
+    row.innerHTML = `<span class="rt">▶ ${esc(fmtRecTime(r.mtime))} ${tag}</span><span class="rs">${esc(fmtSize(r.size))}</span>`;
     row.addEventListener("click", () => playRecUrl(`${title} — ${fmtRecTime(r.mtime)}`, url));
     list.appendChild(row);
   }
@@ -3765,11 +3849,12 @@ function camLabel(dev) {
   return dev.name || `${dev.host}${dev.vendor && dev.vendor !== "desconocido" ? " · " + dev.vendor : ""}`;
 }
 
+// Lista de cámaras para asignar a un usuario. Se vuelve a pedir cada vez que
+// se abre el selector (una cámara nueva aparece sin recargar la página); si la
+// petición falla se usa la última lista conocida.
 async function deviceList() {
-  if (!state.allDevices) {
-    try { state.allDevices = (await api("/api/devices")).devices; }
-    catch (_) { state.allDevices = []; }
-  }
+  try { state.allDevices = (await api("/api/devices")).devices; }
+  catch (_) { state.allDevices = state.allDevices || []; }
   return state.allDevices;
 }
 
@@ -3778,15 +3863,15 @@ async function buildCamChecks(container, selected = []) {
   const devs = await deviceList();
   container.innerHTML = devs.map((d) => {
     const pub = (d.streams || []).find((s) => s.published);
-    const thumb = pub ? `/api/wall/${pub.id}/frame` : "";   // fotograma cacheado
+    const thumb = pub ? `/api/wall/${encodeURIComponent(pub.id)}/frame` : "";   // fotograma cacheado
     return `
     <label class="camcheck">
       <span class="camthumb">${thumb
-        ? `<img src="${thumb}" alt="" onerror="this.remove()">`
+        ? `<img src="${esc(thumb)}" alt="" onerror="this.remove()">`
         : ""}<span class="noimg">sin vista</span></span>
       <span class="camrow">
-        <input type="checkbox" value="${d.id}" ${sel.has(d.id) ? "checked" : ""}>
-        <span class="camname">${camLabel(d)}</span>
+        <input type="checkbox" value="${esc(d.id)}" ${sel.has(d.id) ? "checked" : ""}>
+        <span class="camname">${esc(camLabel(d))}</span>
       </span>
     </label>`;
   }).join("") || '<span class="hint">Escanea o agrega cámaras primero.</span>';
@@ -3824,8 +3909,8 @@ function userRow(u) {
   const li = document.createElement("li");
   const admin = u.role === "admin";
   li.innerHTML = `
-    <span class="uname">${u.username}</span>
-    <span class="urole ${admin ? "admin" : ""}">${u.role}</span>
+    <span class="uname">${esc(u.username)}</span>
+    <span class="urole ${admin ? "admin" : ""}">${esc(u.role)}</span>
     <span class="ucount">${admin ? "todas las cámaras" : u.cameras.length + " cámara(s)"}</span>
     <span class="uspacer"></span>
     ${admin ? "" : '<button class="ghost small" data-edit>Cámaras</button>'}
@@ -3834,27 +3919,34 @@ function userRow(u) {
 
   const editBtn = li.querySelector("[data-edit]");
   if (editBtn) editBtn.addEventListener("click", async () => {
-    if (li.querySelector(".rowedit")) { li.querySelector(".rowedit").remove(); return; }
+    // Un solo contenedor (lista + botón Guardar): plegar lo quita entero y
+    // desplegar de nuevo no acumula botones.
+    const open = li.querySelector(".rowedit");
+    if (open) { open.remove(); return; }
+    if (editBtn.disabled) return;           // ya se está abriendo
+    editBtn.disabled = true;
+    const wrap = document.createElement("div");
+    wrap.className = "rowedit";
     const box = document.createElement("div");
-    box.className = "rowedit camchecks";
-    box.style.flexBasis = "100%";
-    li.appendChild(box);
-    await buildCamChecks(box, u.cameras);
+    box.className = "camchecks";
     const save = document.createElement("button");
-    save.className = "primary small"; save.textContent = "Guardar cámaras";
-    save.style.flexBasis = "100%"; save.style.marginTop = "6px";
-    li.appendChild(save);
+    save.className = "primary small rowsave"; save.textContent = "Guardar cámaras";
+    wrap.append(box, save);
+    try { await buildCamChecks(box, u.cameras); }
+    finally { editBtn.disabled = false; }
+    li.appendChild(wrap);
     save.addEventListener("click", async () => {
+      save.disabled = true;
       try {
         await api(`/api/users/${u.id}`, { method: "PUT",
           body: JSON.stringify({ cameras: $$in(box, "input:checked").map((c) => c.value) }) });
         toast("Cámaras actualizadas"); loadUsers();
-      } catch (err) { toast(err.message, true); }
+      } catch (err) { toast(err.message, true); save.disabled = false; }
     });
   });
 
   li.querySelector("[data-pass]").addEventListener("click", async () => {
-    const pass = prompt(`Nueva contraseña para ${u.username} (≥4):`);
+    const pass = await uiPrompt(`Nueva contraseña para ${u.username} (≥4):`, { type: "password", okLabel: "Cambiar" });
     if (!pass) return;
     if (pass.length < 4) return toast("Mínimo 4 caracteres", true);
     try { await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ password: pass }) });
@@ -3862,7 +3954,7 @@ function userRow(u) {
   });
 
   li.querySelector("[data-del]").addEventListener("click", async () => {
-    if (!confirm(`¿Borrar al usuario ${u.username}?`)) return;
+    if (!(await uiConfirm(`¿Borrar al usuario ${u.username}?`, { okLabel: "Borrar", danger: true }))) return;
     try { await api(`/api/users/${u.id}`, { method: "DELETE" }); toast("Usuario borrado"); loadUsers(); }
     catch (err) { toast(err.message, true); }
   });
