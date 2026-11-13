@@ -166,7 +166,6 @@
   </p>
 </main>
 
-<!-- ------------------------------------------------ AJUSTES -->
 <!-- ------------------------------------------------ GRABACIONES -->
 <main id="view-grabaciones" class="view">
   <section class="recbar">
@@ -206,164 +205,209 @@
   </div>
 </div>
 
+<!-- ------------------------------------------------ AJUSTES -->
 <main id="view-ajustes" class="view">
-  <!-- Resumen de salud del equipo (CPU, RAM, disco, temperaturas) leído de Netdata -->
-  <section class="panel" id="panelSalud" data-admin>
-    <h2><span aria-hidden="true">🩺</span> Salud del equipo</h2>
-    <p class="hint" id="hsSummary">Leyendo…</p>
-    <div class="hsgrid" id="hsGrid"></div>
-    <div class="hstemps" id="hsTemps"></div>
-    <table class="hscont" id="hsCont" hidden>
-      <thead><tr><th>Contenedor</th><th>CPU</th><th>Memoria</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="hint"><a id="hsLink" href="#" target="_blank" rel="noopener">Abrir Netdata (detalle e históricos)</a></p>
-  </section>
+  <div class="gx-page aj-layout">
 
-  <section class="panel" id="panelSite">
-    <h2><span aria-hidden="true">🏷️</span> Identificación de esta instancia</h2>
-    <p class="hint">Nombre del <strong>taladro o sitio</strong> donde corre este CamWay. Se muestra
-      en el encabezado, el mosaico, la vista DVR, la pantalla de login y la pestaña
-      del navegador, y sale en cada alerta de WhatsApp/correo para saber de dónde viene.</p>
-    <div class="userform">
-      <input id="siteName" aria-label="Nombre del taladro o sitio" type="text" maxlength="60" placeholder="ej. Taladro PDV-108 · Pozo JA20-14" autocomplete="off">
-      <button id="btnSiteSave" class="primary">Guardar</button>
-    </div>
-  </section>
+    <nav class="aj-side" id="ajSide" aria-label="Secciones de ajustes">
+      <button type="button" class="aj-sidebtn" data-aj-go="general" data-admin aria-current="page"><span class="aj-mark" aria-hidden="true"></span>General</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="alertas" aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Alertas</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="usuarios" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Usuarios</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="video" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Vídeo y grabación</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="red" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Red y escaneo</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="kiosco" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Equipo de guardia</button>
+      <button type="button" class="aj-sidebtn" data-aj-go="salud" data-admin aria-current="false"><span class="aj-mark" aria-hidden="true"></span>Salud del equipo</button>
+    </nav>
 
-  <!-- Destinatarios de los avisos con foto por WhatsApp. Lo gestiona el admin o
-       el jefe de seguridad (rol "seguridad"). -->
-  <section class="panel" id="panelAlertas" hidden>
-    <h2><span aria-hidden="true">📲</span> Destinatarios de alertas (WhatsApp)</h2>
-    <p class="hint">Cuando una cámara detecta una alarma (persona sin casco, fuego…)
-      se envía una <strong>foto del momento</strong> a estos números. Usa el número
-      con código de país. Cada cámara decide qué avisar en su botón <strong>IA</strong>
-      (“Avisar con foto por WhatsApp”).</p>
-    <!-- Dispositivo que ENVÍA los avisos (solo admin): estado, desvincular, vincular otro -->
-    <div class="wacard" id="waCard" hidden>
-      <div class="warow"><span class="dot" id="waDot"></span><strong id="waTitle">WhatsApp</strong></div>
-      <p class="hint" id="waDetail"></p>
-      <div class="warow">
-        <button id="waLink" class="primary" type="button">Vincular dispositivo</button>
-        <button id="waUnlink" class="ghost" type="button">Desvincular</button>
-      </div>
-    </div>
-    <p class="hint" id="alStatus"></p>
-    <div class="userform">
-      <input id="alName" aria-label="Nombre del destinatario" type="text" placeholder="nombre (ej. Jefe de seguridad)" maxlength="40" autocomplete="off">
-      <input id="alPhone" aria-label="Número de teléfono" type="tel" placeholder="+58 414 1234567" autocomplete="off" inputmode="tel">
-      <button id="alAdd" class="primary">Agregar número</button>
-    </div>
-    <ul id="alList" class="userlist"></ul>
-    <h3 class="subhead">Últimos avisos</h3>
-    <ul id="alLog" class="userlist"></ul>
-  </section>
+    <div class="aj-content">
 
-  <section class="panel">
-    <h2>Usuarios y perfiles</h2>
-    <p class="hint">El <strong>administrador</strong> ve y gestiona todo. Un
-      <strong>viewer</strong> solo ve las cámaras que le asignes (y configura la
-      IA de esas cámaras). Cada usuario tiene su propia configuración de IA.</p>
-    <div class="userform">
-      <input id="uName" aria-label="Nombre de usuario" type="text" placeholder="usuario" spellcheck="false" autocomplete="off">
-      <input id="uPass" aria-label="Contraseña" type="password" placeholder="contraseña (≥4)" autocomplete="new-password">
-      <select id="uRole" aria-label="Rol">
-        <option value="viewer">viewer</option>
-        <option value="seguridad">seguridad (jefe de seguridad)</option>
-        <option value="admin">admin</option>
-      </select>
-      <button id="btnAddUser" class="primary">Crear usuario</button>
-    </div>
-    <p class="hint">Tras crear un viewer, pulsa <strong>Cámaras</strong> en su
-      fila para elegir qué cámaras puede ver.</p>
-    <ul id="userList" class="userlist"></ul>
-  </section>
+      <!-- General -->
+      <section class="aj-section" id="aj-general" data-aj="general" data-admin>
+        <h1 class="gx-h1">General</h1>
+        <div class="cw-card aj-card" id="panelSite">
+          <label class="gx-field">Nombre del sitio
+            <input id="siteName" class="gx-in" type="text" maxlength="60" placeholder="ej. Taladro PDV-108 · Pozo JA20-14" autocomplete="off">
+            <span class="gx-hint">Aparece en el encabezado, el mosaico, la vista DVR, el inicio de sesión y cada alerta.</span>
+          </label>
+          <div class="aj-logorow">
+            <div class="aj-logobox">
+              <img id="logoPreview" class="aj-logoimg" alt="Logo del sitio" hidden>
+              <span id="logoNone">Sin logo</span>
+            </div>
+            <label class="cw-btn aj-filebtn">Subir logo
+              <input type="file" id="logoFile" accept="image/*" class="sr-only">
+            </label>
+            <button id="btnLogoClear" class="cw-btn" type="button">Quitar</button>
+            <span class="gx-hint" id="logoHint">Sale en el encabezado de «Ajustar a pantalla». PNG o SVG, fondo transparente.</span>
+          </div>
+          <div><button id="btnSiteSave" class="cw-btn cw-btn--primary" type="button">Guardar nombre</button></div>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Equipo cliente / kiosco</h2>
-    <p class="hint">Comandos para abrir CamWay en <strong>pantalla completa</strong> al
-      arrancar la máquina (p. ej. la del guardia). Copia el que corresponda a su
-      navegador y pégalo en un acceso directo o terminal de esa máquina; para que
-      arranque solo, ponlo en <code>shell:startup</code>. Salir del kiosco: Alt+F4.</p>
-    <div class="kioskrow">
-      <label>Dirección de CamWay</label>
-      <div class="copyfield"><code id="kioskUrl"></code><button class="ghost small" data-copy="#kioskUrl">Copiar</button></div>
-    </div>
-    <div class="kioskrow">
-      <label>Chrome (kiosco)</label>
-      <div class="copyfield"><code id="kioskChrome"></code><button class="ghost small" data-copy="#kioskChrome">Copiar</button></div>
-    </div>
-    <div class="kioskrow">
-      <label>Edge (kiosco)</label>
-      <div class="copyfield"><code id="kioskEdge"></code><button class="ghost small" data-copy="#kioskEdge">Copiar</button></div>
-    </div>
-    <p class="hint">La sesión queda guardada ~30 días: inicia sesión una vez en esa
-      máquina y no volverá a pedir login tras reiniciar (no borrar cookies al cerrar).</p>
-  </section>
+      <!-- Alertas (admin y seguridad) -->
+      <section class="aj-section" id="aj-alertas" data-aj="alertas" hidden>
+        <h1 class="gx-h1">Alertas por WhatsApp</h1>
+        <p class="gx-sub">Cuando una cámara detecta una alarma, se envía una foto a estos números. Cada cámara elige qué avisar en su botón IA.</p>
+        <div id="panelAlertas" class="aj-stack" hidden>
+          <div class="cw-card aj-wa" id="waCard" hidden>
+            <span class="cw-dot aj-dot" id="waDot"></span>
+            <div class="aj-wa-text">
+              <div class="aj-wa-title" id="waTitle">WhatsApp</div>
+              <div class="gx-hint" id="waDetail"></div>
+            </div>
+            <button id="waLink" class="cw-btn" type="button">Vincular dispositivo</button>
+            <button id="waUnlink" class="cw-btn" type="button">Desvincular</button>
+          </div>
+          <div class="cw-card aj-card">
+            <div class="aj-cardtitle">Destinatarios</div>
+            <p class="gx-hint aj-status" id="alStatus" role="status"></p>
+            <div class="aj-formrow">
+              <label class="gx-field aj-grow">Nombre
+                <input id="alName" class="gx-in" type="text" placeholder="ej. Jefe de seguridad" maxlength="40" autocomplete="off">
+              </label>
+              <label class="gx-field aj-grow">Número con código de país
+                <input id="alPhone" class="gx-in" type="tel" placeholder="+58 414 1234567" autocomplete="off" inputmode="tel">
+              </label>
+              <button id="alAdd" class="cw-btn cw-btn--primary" type="button">Agregar</button>
+            </div>
+            <ul id="alList" class="aj-list"></ul>
+          </div>
+          <div class="cw-card aj-card">
+            <div class="aj-cardtitle">Últimos avisos</div>
+            <ul id="alLog" class="aj-list"></ul>
+          </div>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Logo</h2>
-    <p class="hint">Aparece en el encabezado del modo «Ajustar a pantalla» (video wall).</p>
-    <div class="logorow">
-      <img id="logoPreview" class="logoprev" alt="logo" hidden>
-      <label class="filebtn">Elegir imagen
-        <input type="file" id="logoFile" accept="image/*" class="sr-only">
-      </label>
-      <button id="btnLogoClear" class="ghost">Quitar</button>
-      <span class="hint" id="logoHint"></span>
-    </div>
-  </section>
+      <!-- Usuarios -->
+      <section class="aj-section" id="aj-usuarios" data-aj="usuarios" data-admin hidden>
+        <h1 class="gx-h1">Usuarios</h1>
+        <p class="gx-sub">Administrador: todo. Vigilante: solo las cámaras que le asignes. Seguridad: las alertas.</p>
+        <div class="cw-card aj-tablecard">
+          <div class="aj-uhead"><span>Usuario</span><span>Rol</span><span>Cámaras</span><span class="aj-r">Acciones</span></div>
+          <ul id="userList" class="aj-ulist"></ul>
+        </div>
+        <div class="cw-card aj-card">
+          <div class="aj-cardtitle">Crear usuario</div>
+          <div class="aj-formrow">
+            <label class="gx-field aj-grow">Usuario
+              <input id="uName" class="gx-in" type="text" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="gx-field aj-grow">Contraseña
+              <input id="uPass" class="gx-in" type="password" placeholder="4 caracteres o más" autocomplete="new-password">
+            </label>
+            <label class="gx-field aj-grow">Rol
+              <select id="uRole" class="gx-in">
+                <option value="viewer">Vigilante (solo sus cámaras)</option>
+                <option value="seguridad">Seguridad (alertas)</option>
+                <option value="admin">Administrador</option>
+              </select>
+            </label>
+            <button id="btnAddUser" class="cw-btn cw-btn--primary" type="button">Crear</button>
+          </div>
+          <p class="gx-hint">Tras crear un vigilante, pulsa «Cámaras» en su fila para elegir qué ve.</p>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Calidad de vídeo y grabación</h2>
-    <p class="hint">Afecta el vídeo en vivo al maximizar y lo que se graba. Un
-      bitrate más bajo = menos nitidez pero MÁS días de grabación continua.
-      Aplica a las cámaras que se transcodifican (HEVC/MJPEG/3K).</p>
-    <div class="settingsgrid">
-      <label>Resolución máxima
-        <select id="encRes">
-          <option value="854x480">480p (ligero)</option>
-          <option value="1280x720">720p</option>
-          <option value="1920x1080">1080p</option>
-          <option value="2560x1440">1440p</option>
-        </select>
-      </label>
-      <label>Cuadros por segundo
-        <input id="encFps" type="number" min="1" max="30">
-      </label>
-      <label>Bitrate por cámara
-        <select id="encBitrate">
-          <option value="">Automático (calidad fija, tamaño variable)</option>
-          <option value="500k">0,5 Mbps</option>
-          <option value="800k">0,8 Mbps</option>
-          <option value="1000k">1 Mbps</option>
-          <option value="1500k">1,5 Mbps</option>
-          <option value="2000k">2 Mbps</option>
-          <option value="4000k">4 Mbps</option>
-        </select>
-      </label>
-    </div>
-    <p class="hint" id="encEstimate"></p>
-    <button id="btnSaveEnc" class="primary">Guardar y aplicar</button>
-    <p class="hint" id="encHint"></p>
-  </section>
+      <!-- Vídeo y grabación -->
+      <section class="aj-section" id="aj-video" data-aj="video" data-admin hidden>
+        <h1 class="gx-h1">Vídeo y grabación</h1>
+        <p class="gx-sub">Afecta al vídeo en vivo al ampliar y a lo que se graba. Menos bitrate = menos nitidez y más días de grabación. Se aplica a las cámaras que se transcodifican (HEVC, MJPEG, 3K).</p>
+        <div class="cw-card aj-card">
+          <div class="aj-grid2">
+            <label class="gx-field">Resolución máxima
+              <select id="encRes" class="gx-in">
+                <option value="854x480">480p (ligero)</option>
+                <option value="1280x720">720p</option>
+                <option value="1920x1080">1080p</option>
+                <option value="2560x1440">1440p</option>
+              </select>
+            </label>
+            <label class="gx-field">Cuadros por segundo
+              <input id="encFps" class="gx-in" type="number" min="1" max="30">
+            </label>
+            <label class="gx-field aj-span2">Bitrate por cámara
+              <select id="encBitrate" class="gx-in">
+                <option value="">Automático (calidad fija, tamaño variable)</option>
+                <option value="500k">0,5 Mbps</option>
+                <option value="800k">0,8 Mbps</option>
+                <option value="1000k">1 Mbps</option>
+                <option value="1500k">1,5 Mbps</option>
+                <option value="2000k">2 Mbps</option>
+                <option value="4000k">4 Mbps</option>
+              </select>
+            </label>
+          </div>
+          <p class="gx-hint" id="encEstimate"></p>
+          <div><button id="btnSaveEnc" class="cw-btn cw-btn--primary" type="button">Guardar y aplicar</button></div>
+          <p class="gx-hint" id="encHint" role="status"></p>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Barrido</h2>
-    <div class="settingsgrid">
-      <label>Puertos RTSP
-        <input id="setPorts" type="text" placeholder="554, 8554, 10554">
-      </label>
-      <label>Concurrencia
-        <input id="setConc" type="number" min="10" max="1000">
-      </label>
-      <label>Espera de conexión (s)
-        <input id="setTimeout" type="number" min="0.2" max="10" step="0.1">
-      </label>
+      <!-- Red y escaneo -->
+      <section class="aj-section" id="aj-red" data-aj="red" data-admin hidden>
+        <h1 class="gx-h1">Red y escaneo</h1>
+        <div class="cw-card aj-card">
+          <div class="aj-grid2">
+            <label class="gx-field">Segmento por defecto
+              <input id="setCidr" class="gx-in gx-mono" type="text" placeholder="172.16.0.0/24" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="gx-field">Puertos RTSP
+              <input id="setPorts" class="gx-in gx-mono" type="text" placeholder="554, 8554, 10554">
+            </label>
+            <label class="gx-field">Equipos a la vez
+              <input id="setConc" class="gx-in" type="number" min="10" max="1000">
+            </label>
+            <label class="gx-field">Tiempo de espera por equipo (s)
+              <input id="setTimeout" class="gx-in" type="number" min="0.2" max="10" step="0.1">
+            </label>
+          </div>
+          <div><button id="btnSaveSettings" class="cw-btn cw-btn--primary" type="button">Guardar</button></div>
+          <p class="gx-hint" id="settingsHint" role="status"></p>
+        </div>
+      </section>
+
+      <!-- Equipo de guardia (kiosco) -->
+      <section class="aj-section" id="aj-kiosco" data-aj="kiosco" data-admin hidden>
+        <h1 class="gx-h1">Equipo de guardia (kiosco)</h1>
+        <p class="gx-sub">Abre CamWay a pantalla completa al encender la PC del guardia. Copia el comando y ponlo en <code>shell:startup</code>. Para salir del kiosco: Alt+F4.</p>
+        <div class="cw-card aj-card">
+          <div class="aj-copy">
+            <div class="aj-copylabel">Dirección de CamWay</div>
+            <div class="aj-copyrow"><code class="aj-code" id="kioskUrl"></code><button type="button" class="cw-btn" data-copy="#kioskUrl">Copiar</button></div>
+          </div>
+          <div class="aj-copy">
+            <div class="aj-copylabel">Chrome en modo kiosco</div>
+            <div class="aj-copyrow"><code class="aj-code" id="kioskChrome"></code><button type="button" class="cw-btn" data-copy="#kioskChrome">Copiar</button></div>
+          </div>
+          <div class="aj-copy">
+            <div class="aj-copylabel">Edge en modo kiosco</div>
+            <div class="aj-copyrow"><code class="aj-code" id="kioskEdge"></code><button type="button" class="cw-btn" data-copy="#kioskEdge">Copiar</button></div>
+          </div>
+          <p class="gx-hint">La sesión dura ~30 días: inicia sesión una vez en esa PC y no volverá a pedirla al reiniciar (no borres las cookies al cerrar).</p>
+        </div>
+      </section>
+
+      <!-- Salud del equipo -->
+      <section class="aj-section" id="aj-salud" data-aj="salud" data-admin hidden>
+        <h1 class="gx-h1">Salud del equipo</h1>
+        <div id="panelSalud" class="aj-stack">
+          <div class="aj-basics" id="hsBasics"></div>
+          <p class="aj-note" id="hsSummary" role="status">Leyendo…</p>
+          <div class="aj-tiles" id="hsGrid"></div>
+          <div class="aj-chips" id="hsTemps"></div>
+          <div class="cw-card aj-tablecard" id="hsContWrap" hidden>
+            <table class="aj-table" id="hsCont" hidden>
+              <thead><tr><th>Contenedor</th><th>CPU</th><th>Memoria</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="gx-hint"><a id="hsLink" href="#" target="_blank" rel="noopener">Abrir Netdata (detalle e históricos)</a></p>
+        </div>
+      </section>
+
     </div>
-    <button id="btnSaveSettings" class="primary">Guardar</button>
-    <p class="hint" id="settingsHint"></p>
-  </section>
+  </div>
 </main>
 
 <!-- Vincular el WhatsApp que envía los avisos (QR o código) -->

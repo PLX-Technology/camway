@@ -210,17 +210,65 @@ $$(".tab").forEach((tab) => {
 
 // --------------------------------------------------------------- salud
 
+let lastHealth = null;        // último /api/health (null = sin respuesta)
+let hsNetdataWarn = false;    // Netdata reporta algo que atender (se llena en loadHealth)
+
 async function pollHealth() {
   try {
     const h = await api("/api/health");
+    lastHealth = h;
     $("#dotApi").className = "dot on";
     $("#dotMtx").className = "dot " + (h.mediamtx ? "on" : "off");
     $("#tagDevices").textContent =
       h.devices === 1 ? "1 equipo" : `${h.devices} equipos`;
   } catch (_) {
+    lastHealth = null;
     $("#dotApi").className = "dot off";
     $("#dotMtx").className = "dot off";
   }
+  renderHealthBasics();
+}
+
+// Lo básico de «Salud del equipo», con datos reales de /api/health (no necesita
+// Netdata): servidor, vídeo, detector, cámaras publicadas y disco.
+function healthTile(label, value, level) {
+  const t = document.createElement("div");
+  t.className = "cw-card aj-basic";
+  const l = document.createElement("div"); l.className = "aj-basic-l"; l.textContent = label;
+  const v = document.createElement("div"); v.className = "aj-basic-v " + level; v.textContent = value;
+  t.append(l, v);
+  return t;
+}
+
+function renderHealthBasics() {
+  const box = $("#hsBasics");
+  if (!box) return;
+  const h = lastHealth;
+  const tiles = [healthTile("Servidor de CamWay", h ? "En línea" : "Sin respuesta", h ? "ok" : "bad")];
+  let mark = h ? "ok" : "bad";
+  if (h) {
+    tiles.push(healthTile("Servidor de vídeo", h.mediamtx ? "En línea" : "Sin respuesta", h.mediamtx ? "ok" : "bad"));
+    if (!h.mediamtx) mark = "bad";
+    if (typeof h.detector === "boolean") {
+      tiles.push(healthTile("Detector de IA", h.detector ? "Activo" : "Apagado", h.detector ? "ok" : "warn"));
+    }
+    let pub = 0;
+    state.devices.forEach((d) => (d.streams || []).forEach((st) => { if (st.published) pub++; }));
+    if (pub) {
+      const stale = Number(h.cameras_stale) || 0;
+      tiles.push(healthTile("Cámaras publicadas",
+        stale ? `${Math.max(0, pub - stale)} de ${pub} con imagen` : `${pub} en línea`, stale ? "warn" : "ok"));
+      if (stale && mark === "ok") mark = "warn";
+    }
+    if (typeof h.disk_free_pct === "number") {
+      const lvl = h.disk_free_pct < 8 ? "bad" : h.disk_free_pct < 15 ? "warn" : "ok";
+      tiles.push(healthTile("Disco libre", `${Math.round(h.disk_free_pct)} %`, lvl));
+      if (lvl !== "ok" && mark !== "bad") mark = lvl;
+    }
+  }
+  if (hsNetdataWarn && mark === "ok") mark = "warn";
+  box.replaceChildren(...tiles);
+  ajMark("salud", mark);
 }
 
 // --------------------------------------------------------------- escaneo
@@ -2900,7 +2948,7 @@ async function loadWaCard() {
   let w;
   try { w = await api("/api/settings/whatsapp"); } catch (_) { return; }
   const [cls, txt] = WA_STATE_TXT[w.state] || ["", w.state];
-  $("#waDot").className = "dot " + cls;
+  $("#waDot").className = "cw-dot aj-dot" + (cls ? " " + cls : "");
   $("#waTitle").textContent = w.state === "open"
     ? `WhatsApp vinculado: +${w.number || "?"}${w.name ? " · " + w.name : ""}`
     : `WhatsApp: ${txt}`;
@@ -3004,16 +3052,16 @@ function fmtUptime(s) {
 
 function hsTile(label, value, sub, pct, level) {
   const t = document.createElement("div");
-  t.className = "hstile" + (level && level !== "ok" ? " " + level : "");
-  const l = document.createElement("div"); l.className = "hsl"; l.textContent = label;
-  const v = document.createElement("div"); v.className = "hsv"; v.textContent = value;
+  t.className = "cw-card aj-tile" + (level && level !== "ok" ? " " + level : "");
+  const l = document.createElement("div"); l.className = "aj-tile-l"; l.textContent = label;
+  const v = document.createElement("div"); v.className = "aj-tile-v"; v.textContent = value;
   t.append(l, v);
   if (pct != null) {
-    const b = document.createElement("div"); b.className = "hsbar";
+    const b = document.createElement("div"); b.className = "aj-tile-bar";
     const i = document.createElement("i"); i.style.width = Math.min(100, Math.max(0, pct)) + "%";
     b.append(i); t.append(b);
   }
-  const s = document.createElement("div"); s.className = "hss"; s.textContent = sub;
+  const s = document.createElement("div"); s.className = "aj-tile-s"; s.textContent = sub;
   t.append(s);
   return t;
 }
@@ -3022,19 +3070,27 @@ async function loadHealth() {
   const panel = $("#panelSalud");
   if (!panel || !isAdmin()) return;
   const sum = $("#hsSummary");
+  renderHealthBasics();
   let h;
   try { h = await api("/api/system/health"); }
-  catch (e) { sum.textContent = "No se pudo consultar el estado del equipo: " + e.message; return; }
+  catch (e) { sum.className = "aj-note warn"; sum.textContent = "No se pudo consultar el estado del equipo: " + e.message; return; }
   $("#hsLink").href = `http://${location.hostname}:19999`;
   if (!h.ok) {
-    sum.className = "hint hsstat-warn"; sum.textContent = h.error;
-    $("#hsGrid").replaceChildren(); $("#hsTemps").replaceChildren(); $("#hsCont").hidden = true;
+    // Sin Netdata no es un fallo: solo faltan CPU, memoria y disco del equipo.
+    sum.className = "aj-note";
+    sum.textContent = "CPU, memoria y disco del equipo aparecen aquí cuando Netdata está instalado.";
+    sum.title = h.error || "";
+    hsNetdataWarn = false;
+    $("#hsGrid").replaceChildren(); $("#hsTemps").replaceChildren(); $("#hsContWrap").hidden = true; $("#hsCont").hidden = true;
     return;
   }
-  sum.className = "hint hsstat-" + h.status;
+  sum.title = "";
+  hsNetdataWarn = h.status !== "ok";
+  renderHealthBasics();
+  sum.className = "aj-note " + (h.status === "ok" ? "ok" : "warn");
   sum.textContent = h.status === "ok"
-    ? `✔ Equipo en buen estado · encendido hace ${fmtUptime(h.uptime_s)}`
-    : `⚠ ${h.issues.join(" · ")}`;
+    ? `Equipo en buen estado · encendido hace ${fmtUptime(h.uptime_s)}`
+    : `Atención: ${h.issues.join(" · ")}`;
   $("#hsGrid").replaceChildren(
     hsTile("CPU", h.cpu.pct.toFixed(0) + " %", `carga ${h.cpu.load.join(" / ")} · ${h.cpu.cores} núcleos`, h.cpu.pct, h.cpu.level),
     hsTile("Memoria", h.ram.pct.toFixed(0) + " %", `${h.ram.used_gb} de ${h.ram.total_gb} GB`, h.ram.pct, h.ram.level),
@@ -3043,7 +3099,7 @@ async function loadHealth() {
   );
   $("#hsTemps").replaceChildren(...h.sensors.map((s) => {
     const c = document.createElement("span");
-    c.className = "hschip" + (s.level !== "ok" ? " " + s.level : "");
+    c.className = "aj-chip" + (s.level !== "ok" ? " " + s.level : "");
     c.append(s.name);
     const b = document.createElement("b"); b.textContent = s.c.toFixed(0) + " °C"; c.append(b);
     return c;
@@ -3057,12 +3113,13 @@ async function loadHealth() {
     return tr;
   }));
   $("#hsCont").hidden = !h.containers.length;
+  $("#hsContWrap").hidden = !h.containers.length;
 }
 
 // Sondeo único de Ajustes. Solo trabaja si la vista Ajustes está activa y la
 // pestaña del navegador visible (en Mosaico no hay peticiones de Ajustes).
-//   · salud del equipo: cada 5 s (solo admin; loadHealth lo comprueba)
-//   · WhatsApp + destinatarios + log: cada 15 s, UNA consulta de WhatsApp por
+//   · salud del equipo: cada 5 s, solo en la sección «Salud» (admin)
+//   · WhatsApp + destinatarios + log: cada 15 s, solo en la sección «Alertas», UNA consulta de WhatsApp por
 //     ciclo (loadAlertPanel ya llama a loadWaCard) y sin pisar el modal de
 //     vinculación, que tiene su propio sondeo.
 const SETTINGS_TICK_MS = 5000;
@@ -3074,11 +3131,12 @@ function settingsPollActive() {
   return !!(v && v.classList.contains("active")) && !document.hidden;
 }
 
+// Solo se consulta lo de la sección de Ajustes que se está viendo.
 function settingsPollTick(force = false) {
   if (!settingsPollActive()) return;
-  loadHealth();
+  if (ajCurrent === "salud") loadHealth();
   const now = Date.now();
-  if ((force || now - lastAlertsPoll >= ALERTS_EVERY_MS - 500) && $("#waModal").hidden) {
+  if (ajCurrent === "alertas" && (force || now - lastAlertsPoll >= ALERTS_EVERY_MS - 500) && $("#waModal").hidden) {
     loadAlertPanel({ poll: true });
   }
 }
@@ -3112,35 +3170,44 @@ async function paintAlertPanel(opts) {
   try { a = await api("/api/settings/alerts"); } catch (_) { return; }
   const act = a.recipients.filter((r) => r.enabled).length;
   const waWarn = a.wa_state && a.wa_state !== "open" && a.wa_state !== "unconfigured"
-    ? "⚠ WhatsApp sin dispositivo vinculado: las alertas esperan en cola. Avisa al administrador. " : "";
-  $("#alStatus").textContent = waWarn + (!a.channels.whatsapp && !a.channels.email
-    ? "⚠ Todavía no hay destinatarios activos: agrega al menos un número."
-    : `✔ ${act} número(s) activo(s)` + (a.channels.group ? " + un grupo fijo del servidor" : "") +
+    ? "WhatsApp sin dispositivo vinculado: las alertas esperan en cola. Avisa al administrador. " : "";
+  const noRecip = !a.channels.whatsapp && !a.channels.email;
+  const st = $("#alStatus");
+  st.textContent = waWarn + (noRecip
+    ? "Todavía no hay destinatarios activos: agrega al menos un número."
+    : `${act} número(s) activo(s)` + (a.channels.group ? " + un grupo fijo del servidor" : "") +
       (a.pending ? ` · ${a.pending} aviso(s) en cola esperando enlace` : ""));
+  const warn = !!waWarn || noRecip || (a.wa_state && a.wa_state !== "open");
+  st.classList.toggle("warn", !!waWarn || noRecip);
+  ajMark("alertas", warn ? "warn" : "ok");
   const list = $("#alList");
   const sig = JSON.stringify([a.recipients, (a.log || []).slice(0, 10), a.labels]);
   if (opts.poll && (sig === alertPanelSig || list.contains(document.activeElement))) return;
   alertPanelSig = sig;
-  list.innerHTML = "";
+  list.replaceChildren();
   if (!a.recipients.length) {
     const li = document.createElement("li");
-    li.innerHTML = '<span class="hint">Sin números todavía.</span>';
+    li.className = "aj-empty";
+    li.textContent = "Todavía no hay destinatarios. Agrega un número para empezar.";
     list.appendChild(li);
   }
   a.recipients.forEach((r) => {
     const li = document.createElement("li");
+    li.className = "aj-rec";
     const on = document.createElement("input");
-    on.type = "checkbox"; on.checked = r.enabled; on.title = "Recibe alertas";
+    on.type = "checkbox"; on.checked = r.enabled; on.className = "aj-check";
+    on.setAttribute("aria-label", `Recibe alertas: ${r.name || fmtPhone(r.phone)}`);
+    on.title = "Recibe alertas";
     on.addEventListener("change", async () => {
       try {
         await api(`/api/settings/alerts/recipients/${r.id}`, { method: "PUT", body: JSON.stringify({ enabled: on.checked }) });
         loadAlertPanel();
       } catch (e) { toast(e.message, true); on.checked = !on.checked; }
     });
-    const nm = document.createElement("span"); nm.className = "uname"; nm.textContent = r.name;
-    const ph = document.createElement("span"); ph.className = "ucount"; ph.textContent = fmtPhone(r.phone);
-    const sp = document.createElement("span"); sp.className = "uspacer";
-    const test = document.createElement("button"); test.className = "ghost small"; test.textContent = "Probar";
+    const nm = document.createElement("span"); nm.className = "aj-recname"; nm.textContent = r.name || "Sin nombre";
+    const ph = document.createElement("span"); ph.className = "aj-recphone gx-mono"; ph.textContent = fmtPhone(r.phone);
+    const acts = document.createElement("span"); acts.className = "aj-recacts";
+    const test = document.createElement("button"); test.type = "button"; test.className = "cw-btn cw-btn--sm"; test.textContent = "Probar";
     test.addEventListener("click", async () => {
       test.disabled = true;
       try {
@@ -3148,28 +3215,29 @@ async function paintAlertPanel(opts) {
         toast(`Mensaje de prueba enviado a ${r.name}`);
       } catch (e) { toast(e.message, true); } finally { test.disabled = false; }
     });
-    const del = document.createElement("button"); del.className = "ghost small"; del.textContent = "Quitar";
+    const del = document.createElement("button"); del.type = "button"; del.className = "cw-btn cw-btn--sm"; del.textContent = "Quitar";
     del.addEventListener("click", async () => {
       if (!(await uiConfirm(`¿Quitar a ${r.name} (${fmtPhone(r.phone)}) de las alertas?`, { okLabel: "Quitar", danger: true }))) return;
       try { await api(`/api/settings/alerts/recipients/${r.id}`, { method: "DELETE" }); loadAlertPanel(); }
       catch (e) { toast(e.message, true); }
     });
-    [on, nm, ph, sp, test, del].forEach((el) => li.appendChild(el));
+    acts.append(test, del);
+    li.append(on, nm, ph, acts);
     list.appendChild(li);
   });
   const lg = $("#alLog");
-  lg.innerHTML = "";
+  lg.replaceChildren();
   (a.log || []).slice(0, 10).forEach((e) => {
     const li = document.createElement("li");
-    const tx = document.createElement("span");
-    tx.className = "ucount";
-    tx.textContent = `${new Date(e.ts * 1000).toLocaleString()} · ${e.camera} · ` +
+    li.className = "aj-logline";
+    li.textContent = `${new Date(e.ts * 1000).toLocaleString()} · ${e.camera} · ` +
       `${(a.labels && a.labels[e.cls]) || e.cls}${e.test ? " (prueba)" : ""} — ${e.status}`;
-    li.appendChild(tx); lg.appendChild(li);
+    lg.appendChild(li);
   });
   if (!a.log || !a.log.length) {
     const li = document.createElement("li");
-    li.innerHTML = '<span class="hint">Aún no se ha enviado ningún aviso.</span>';
+    li.className = "aj-empty";
+    li.textContent = "Aún no se ha enviado ningún aviso.";
     lg.appendChild(li);
   }
 }
@@ -3579,6 +3647,30 @@ initZoneEditor();
 // (vetan la IP del servidor). Las cámaras con clave se dan de alta una a una
 // (su credencial propia o por URL en «Probar un equipo suelto»), sin barrido.
 
+// --- submenú de Ajustes: una sección a la vez ---
+let ajCurrent = "general";
+
+// Punto de color junto a una sección del submenú: ok (verde), warn (ámbar) o bad (rojo).
+function ajMark(id, level) {
+  const b = document.querySelector(`.aj-sidebtn[data-aj-go="${id}"] .aj-mark`);
+  if (b) b.className = "aj-mark" + (level ? " " + level : "");
+}
+
+function ajSelect(id) {
+  const btn = document.querySelector(`.aj-sidebtn[data-aj-go="${id}"]`);
+  if (!btn || btn.style.display === "none") id = canAlerts() && !isAdmin() ? "alertas" : "general";
+  ajCurrent = id;
+  $$(".aj-sidebtn").forEach((b) => b.setAttribute("aria-current", b.dataset.ajGo === id ? "page" : "false"));
+  $$(".aj-section").forEach((sec) => { sec.hidden = sec.dataset.aj !== id; });
+  // Lo de la sección que se abre se pone al día enseguida.
+  if (id === "alertas") loadAlertPanel();
+  else if (id === "usuarios" && isAdmin()) loadUsers();
+  else if (id === "video" && isAdmin()) loadEncoding();
+  else if (id === "kiosco" && isAdmin()) fillKiosk();
+  else if (id === "salud" && isAdmin()) loadHealth();
+}
+$$(".aj-sidebtn").forEach((b) => b.addEventListener("click", () => ajSelect(b.dataset.ajGo)));
+
 // --- OSD en la cámara (nombre + fecha/hora QUEMADOS en el video) ---
 let osdDev = null;
 function openOsdModal(dev) {
@@ -3627,6 +3719,7 @@ $("#osdSave")?.addEventListener("click", async () => {
 async function loadSettings() {
   const s = await api("/api/settings");
   $("#cidr").value = s.cidr;
+  $("#setCidr").value = s.cidr;
   $("#channels").value = s.channels;
   $("#setPorts").value = s.ports.join(", ");
   $("#setConc").value = s.concurrency;
@@ -3645,6 +3738,8 @@ function showLogoPreview(dataUrl) {
     if (dataUrl) { img.src = dataUrl; img.hidden = false; }
     else { img.hidden = true; img.removeAttribute("src"); }
   }
+  const none = $("#logoNone");
+  if (none) none.hidden = !!dataUrl;
 }
 
 // ---- Calidad de vídeo/grabación (resolución, fps, bitrate) ----
@@ -3765,14 +3860,17 @@ $("#btnSaveSettings").addEventListener("click", async () => {
   try {
     const ports = $("#setPorts").value.split(",")
       .map((p) => parseInt(p.trim(), 10)).filter(Boolean);
+    const cidr = $("#setCidr").value.trim();
     await api("/api/settings", {
       method: "POST",
       body: JSON.stringify({
+        ...(cidr ? { cidr } : {}),
         ports,
         concurrency: Number($("#setConc").value),
         connect_timeout: Number($("#setTimeout").value),
       }),
     });
+    if (cidr) $("#cidr").value = cidr;
     $("#settingsHint").textContent = "Guardado.";
     toast("Ajustes guardados");
   } catch (err) {
@@ -4114,8 +4212,9 @@ function applyRole() {
   $$("[data-admin]").forEach((el) => { el.style.display = admin ? "" : "none"; });
   if (u.role === "seguridad") {        // jefe de seguridad: Ajustes = solo los avisos
     const t = $('.tab[data-view="ajustes"]'); if (t) t.style.display = "";
-    $$("#view-ajustes > section.panel").forEach((p) => { p.hidden = p.id !== "panelAlertas"; });
+    const side = $("#ajSide"); if (side) side.hidden = true;   // una sola sección: sin submenú
   }
+  ajSelect(u.role === "seguridad" ? "alertas" : "general");
   if (!admin) {                       // viewer: solo mosaico
     $$(".tab").forEach((t) => t.classList.remove("active"));
     $$(".view").forEach((v) => v.classList.remove("active"));
@@ -4171,16 +4270,16 @@ async function buildCamChecks(container, selected = []) {
     const pub = (d.streams || []).find((s) => s.published);
     const thumb = pub ? `/api/wall/${encodeURIComponent(pub.id)}/frame` : "";   // fotograma cacheado
     return `
-    <label class="camcheck">
-      <span class="camthumb">${thumb
-        ? `<img src="${esc(thumb)}" alt="" onerror="this.remove()">`
-        : ""}<span class="noimg">sin vista</span></span>
-      <span class="camrow">
+    <label class="aj-cam">
+      <span class="aj-camthumb"><span class="aj-noimg">${icon("camera", 18)}</span>${thumb
+        ? `<img src="${esc(thumb)}" alt="" loading="lazy" onerror="this.remove()">`
+        : ""}</span>
+      <span class="aj-camrow">
         <input type="checkbox" value="${esc(d.id)}" ${sel.has(d.id) ? "checked" : ""}>
-        <span class="camname">${esc(camLabel(d))}</span>
+        <span class="aj-camname">${esc(camLabel(d))}</span>
       </span>
     </label>`;
-  }).join("") || '<span class="hint">Escanea o agrega cámaras primero.</span>';
+  }).join("") || '<span class="gx-hint">Escanea o agrega cámaras primero.</span>';
 }
 
 // querySelectorAll dentro de un nodo concreto
@@ -4196,7 +4295,7 @@ $("#btnAddUser").addEventListener("click", async () => {
     await api("/api/users", { method: "POST", body: JSON.stringify({ username, password, role, cameras: [] }) });
     $("#uName").value = ""; $("#uPass").value = "";
     toast(role === "viewer"
-      ? `Viewer ${username} creado — asígnale cámaras con «Cámaras»`
+      ? `Vigilante ${username} creado — asígnale cámaras con «Cámaras»`
       : `Usuario ${username} creado`);
     loadUsers();
   } catch (err) { toast(err.message, true); }
@@ -4207,40 +4306,47 @@ async function loadUsers() {
   if (!list) return;
   let data;
   try { data = await api("/api/users"); } catch (_) { return; }
-  list.innerHTML = "";
+  list.replaceChildren();
   data.users.forEach((u) => list.appendChild(userRow(u)));
 }
 
+const ROLE_LABEL = { admin: "Administrador", viewer: "Vigilante", seguridad: "Seguridad" };
+
 function userRow(u) {
   const li = document.createElement("li");
+  li.className = "aj-urow";
   const admin = u.role === "admin";
+  const n = (u.cameras || []).length;
   li.innerHTML = `
-    <span class="uname">${esc(u.username)}</span>
-    <span class="urole ${admin ? "admin" : ""}">${esc(u.role)}</span>
-    <span class="ucount">${admin ? "todas las cámaras" : u.cameras.length + " cámara(s)"}</span>
-    <span class="uspacer"></span>
-    ${admin ? "" : '<button class="ghost small" data-edit>Cámaras</button>'}
-    <button class="ghost small" data-pass>Clave</button>
-    <button class="ghost small" data-del>Borrar</button>`;
+    <span class="aj-uname">${esc(u.username)}</span>
+    <span class="aj-urole"><span class="cw-chip aj-role${admin ? " aj-role--admin" : ""}">${esc(ROLE_LABEL[u.role] || u.role)}</span></span>
+    <span class="aj-ucams">${admin ? "Todas" : n === 1 ? "1 cámara" : `${n} cámaras`}</span>
+    <span class="aj-uacts">
+      ${admin ? "" : '<button type="button" class="cw-btn cw-btn--sm" data-edit aria-expanded="false">Cámaras</button>'}
+      <button type="button" class="cw-btn cw-btn--sm" data-pass>Cambiar clave</button>
+      <button type="button" class="cw-btn cw-btn--sm cw-btn--danger" data-del>Borrar</button>
+    </span>`;
 
   const editBtn = li.querySelector("[data-edit]");
   if (editBtn) editBtn.addEventListener("click", async () => {
     // Un solo contenedor (lista + botón Guardar): plegar lo quita entero y
     // desplegar de nuevo no acumula botones.
     const open = li.querySelector(".rowedit");
-    if (open) { open.remove(); return; }
+    if (open) { open.remove(); editBtn.setAttribute("aria-expanded", "false"); return; }
     if (editBtn.disabled) return;           // ya se está abriendo
     editBtn.disabled = true;
     const wrap = document.createElement("div");
     wrap.className = "rowedit";
     const box = document.createElement("div");
-    box.className = "camchecks";
+    box.className = "aj-camchecks";
     const save = document.createElement("button");
-    save.className = "primary small rowsave"; save.textContent = "Guardar cámaras";
+    save.type = "button";
+    save.className = "cw-btn cw-btn--primary cw-btn--sm rowsave"; save.textContent = "Guardar cámaras";
     wrap.append(box, save);
     try { await buildCamChecks(box, u.cameras); }
     finally { editBtn.disabled = false; }
     li.appendChild(wrap);
+    editBtn.setAttribute("aria-expanded", "true");
     save.addEventListener("click", async () => {
       save.disabled = true;
       try {
