@@ -2954,6 +2954,22 @@ let zoneCtrl = null;
 let zoneBg = null;          // snapshot congelado del frame
 let zonePoints = [];        // puntos en píxeles del canvas
 let zoneDrawing = false;
+let zoneRestoreSnap = false; // la teja NO estaba en vivo antes de abrir el editor
+
+// Cierra el editor, vuelve al modal de IA y devuelve la teja a fotograma si el
+// editor la había subido a vídeo (si no, quedaba una conexión WHEP abierta).
+function closeZoneEditor() {
+  $("#zoneEditor").hidden = true;
+  $("#aiModal").hidden = false;
+  releaseZoneVideo();
+  zoneBg = null;                 // libera el fotograma congelado
+}
+
+function releaseZoneVideo() {
+  const c = zoneCtrl;
+  if (zoneRestoreSnap && c && state.tiles.get(c.streamId) === c) goSnap(c);
+  zoneRestoreSnap = false;
+}
 
 function waitFrame(video, ms) {
   return new Promise((resolve) => {
@@ -2974,11 +2990,13 @@ async function openZoneEditor(ctrl) {
   $("#zoneCamName").textContent = ctrl.title;
 
   if (!(video.videoWidth > 0)) {
+    zoneRestoreSnap = !ctrl.live;
     goLive(ctrl);   // el editor dibuja sobre un fotograma real del vídeo
     const ok = await waitFrame(video, 6000);
     if (!ok) {
       toast("Conecta la cámara (botón Ver) para poder dibujar la zona", true);
       $("#aiModal").hidden = false;
+      releaseZoneVideo();
       return;
     }
   }
@@ -2993,6 +3011,9 @@ async function openZoneEditor(ctrl) {
   zoneBg.width = canvas.width;
   zoneBg.height = canvas.height;
   zoneBg.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  // Ya hay fotograma congelado: no hace falta mantener el vídeo en vivo
+  // detrás del editor (se baja ahora, no al guardar).
+  releaseZoneVideo();
 
   zonePoints = (ctrl.config.zone || []).map(([x, y]) => [x * canvas.width, y * canvas.height]);
   drawZone();
@@ -3062,10 +3083,7 @@ function initZoneEditor() {
     $("#zoneInfo").textContent = "Sin zona: se detecta en toda la imagen.";
   });
 
-  $("#zoneCancel").addEventListener("click", () => {
-    $("#zoneEditor").hidden = true;
-    $("#aiModal").hidden = false;
-  });
+  $("#zoneCancel").addEventListener("click", closeZoneEditor);
 
   $("#zoneSave").addEventListener("click", () => {
     const canvas = $("#zoneCanvas");
@@ -3077,8 +3095,7 @@ function initZoneEditor() {
     saveAiConfig(zoneCtrl.streamId, zoneCtrl.config);
     refreshZoneTag(zoneCtrl);
     updateZoneState(zoneCtrl);
-    $("#zoneEditor").hidden = true;
-    $("#aiModal").hidden = false;
+    closeZoneEditor();
     toast(zoneCtrl.config.zone ? "Zona guardada" : "Zona borrada (toda la imagen)");
   });
 }
