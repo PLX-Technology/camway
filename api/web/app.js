@@ -631,155 +631,20 @@ function playAlarm() {
 
 // --------------------------------------------------------------- mosaico WHEP
 
-const RECONNECT_MAX_DELAY = 10000;   // techo del retroceso
-const STALL_TICKS = 3;               // ~6 s congelado (a 2 s por tick) => reconecta
+// El reproductor WebRTC es la clase compartida de whep.js (la usan también dvr.js,
+// live.js y tv.js). Aquí solo se fijan las opciones del mosaico y los textos.
+const WALL_WHEP_OPTS = {
+  watchdog: { everyMs: 2000, stallMs: 6000, minStep: 0.05 },   // ~6 s congelado => reconecta
+  retryDelay: WhepPlayer.backoff(10000),                       // 1 s, 2 s, 4 s … techo 10 s
+};
 
-class WhepPlayer {
-  constructor(url, video, onState) {
-    this.url = url;
-    this.video = video;
-    this.onState = onState || (() => {});
-    this.pc = null;
-    this.resource = null;      // URL de la sesión WHEP (para cerrarla en el servidor)
-    this.active = false;       // intención del usuario: quiere ver esta cámara
-    this.retry = 0;            // reconexiones consecutivas (0 = conexión limpia)
-    this.retryTimer = null;
-    this.watchdog = null;
-    this.lastTime = 0;
-    this.stalls = 0;
-  }
-
-  async start() {
-    this.active = true;
-    this.retry = 0;
-    await this._connect();
-  }
-
-  // Cambia entre el flujo ligero (lo) y el 3K (hi). Si está en vivo, reconecta.
-  setQuality(hi) {
-    const target = hi ? (this.urlHi || this.url) : (this.urlLo || this.url);
-    if (!target || target === this.url) return;
-    this.url = target;
-    if (this.active) { this.retry = 0; this._connect(); }
-  }
-
-  async _connect() {
-    this._teardownPc();
-    if (!this.active) return;
-    this.onState(this.retry ? `reconectando (${this.retry})` : "conectando");
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [] });
-      this.pc = pc;
-      pc.addTransceiver("video", { direction: "recvonly" });
-      pc.addTransceiver("audio", { direction: "recvonly" });
-
-      pc.ontrack = (ev) => {
-        if (this.pc !== pc) return;
-        this.video.srcObject = ev.streams[0];
-        this.video.play().catch(() => {});
-        this.retry = 0;
-        this.onState("en vivo");
-        this._startWatchdog();
-      };
-      pc.onconnectionstatechange = () => {
-        if (!this.active || this.pc !== pc) return;
-        if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
-          this._scheduleReconnect();
-        }
-      };
-
-      await pc.setLocalDescription(await pc.createOffer());
-      await this.gatherIce(pc);
-      if (!this.active || this.pc !== pc) return;
-
-      // MediaMTX admite WHEP sin trickle: se manda la oferta ya completa.
-      const res = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: pc.localDescription.sdp,
-      });
-      if (!res.ok) throw new Error(`WHEP ${res.status}`);
-      // URL de la sesión: hay que hacerle DELETE al cerrar, si no MediaMTX
-      // deja la sesión viva (zombi) y se acumulan → CPU y lag.
-      const loc = res.headers.get("Location");
-      if (loc) { try { this.resource = new URL(loc, window.location.href).href; } catch (_) {} }
-      const answer = await res.text();
-      if (!this.active || this.pc !== pc) return;
-      await pc.setRemoteDescription({ type: "answer", sdp: answer });
-    } catch (err) {
-      if (this.active) this._scheduleReconnect();
-    }
-  }
-
-  // Vigila que el video avance; si se congela (MediaMTX perdió la cámara pero
-  // la conexión sigue "viva"), fuerza la reconexión.
-  _startWatchdog() {
-    this._stopWatchdog();
-    this.lastTime = this.video.currentTime;
-    this.stalls = 0;
-    this.watchdog = setInterval(() => {
-      if (!this.active || !this.pc) return;
-      const t = this.video.currentTime;
-      if (t > this.lastTime + 0.05) {
-        this.lastTime = t;
-        this.stalls = 0;
-      } else if (++this.stalls >= STALL_TICKS) {
-        this._scheduleReconnect();
-      }
-    }, 2000);
-  }
-
-  _stopWatchdog() {
-    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
-  }
-
-  _scheduleReconnect() {
-    if (!this.active || this.retryTimer) return;   // ya hay una en cola
-    this._stopWatchdog();
-    this._teardownPc();
-    this.retry++;
-    const delay = Math.min(1000 * 2 ** (this.retry - 1), RECONNECT_MAX_DELAY);
-    this.onState("sin conexión · reintentando…");
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = null;
-      this._connect();
-    }, delay);
-  }
-
-  _teardownPc() {
-    if (this.pc) {
-      try { this.pc.close(); } catch (_) {}
-      this.pc = null;
-    }
-    if (this.resource) {
-      // Cierra la sesión en MediaMTX (si no, queda zombi consumiendo CPU).
-      try { fetch(this.resource, { method: "DELETE", keepalive: true }).catch(() => {}); } catch (_) {}
-      this.resource = null;
-    }
-    if (this.video) this.video.srcObject = null;
-  }
-
-  gatherIce(pc) {
-    return new Promise((resolve) => {
-      if (pc.iceGatheringState === "complete") return resolve();
-      const done = () => {
-        if (pc.iceGatheringState === "complete") {
-          pc.removeEventListener("icegatheringstatechange", done);
-          resolve();
-        }
-      };
-      pc.addEventListener("icegatheringstatechange", done);
-      // Red local: si algún candidato se atasca, no vale la pena esperarlo.
-      setTimeout(resolve, 1500);
-    });
-  }
-
-  stop() {   // parada manual: no reconecta
-    this.active = false;
-    this.retry = 0;
-    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null; }
-    this._stopWatchdog();
-    this._teardownPc();
+function whepStateText(state, n) {
+  switch (state) {
+    case "connecting": return "conectando";
+    case "reconnecting": return `reconectando (${n})`;
+    case "live": return "en vivo";
+    case "novideo": return "sin vídeo";
+    default: return "sin conexión · reintentando…";
   }
 }
 
@@ -1010,7 +875,7 @@ function makeTile(tile) {
   const aiBtn = el.querySelector("[data-ai]");
   const muteBtn = el.querySelector("[data-mute]");
   const alertEl = el.querySelector(".aialert");
-  const player = new WhepPlayer(tile.whep, video, null);
+  const player = new WhepPlayer(tile.whep, video, WALL_WHEP_OPTS);
   player.urlLo = tile.whep;                      // substream ligero (por defecto)
   player.urlHi = tile.whep_hi || tile.whep;      // 3K para pantalla completa
 
@@ -1064,7 +929,7 @@ function makeTile(tile) {
     btn.textContent = player.active ? "Parar" : "Ver";
     btn.setAttribute("aria-label", `${player.active ? "Parar el vídeo de" : "Ver en vivo"} ${tile.title}`);
   };
-  player.onState = setState;
+  player.onState = (state, n) => setState(whepStateText(state, n));
   state.players.set(tile.stream_id, player);
 
   btn.addEventListener("click", () => {

@@ -22,53 +22,33 @@ let focus = 0;
 let maxed = -1;
 
 // ---- reproducción: WebRTC primero, HLS de respaldo ----
-function gatherIce(pc) {
-  return new Promise((res) => {
-    if (pc.iceGatheringState === "complete") return res();
-    const d = () => { if (pc.iceGatheringState === "complete") { pc.removeEventListener("icegatheringstatechange", d); res(); } };
-    pc.addEventListener("icegatheringstatechange", d);
-    setTimeout(res, 2500);
-  });
+// El WebRTC es el WhepPlayer compartido (whep.js); tras 2 fallos seguidos, si la
+// cámara tiene HLS, se cambia a HLS (Android TV de poca RAM).
+function tvPlayer(t) {
+  if (!t.player) {
+    t.player = new WhepPlayer(null, t.video, {
+      iceWaitMs: 2500,
+      retryDelay: WhepPlayer.backoff(8000),
+      fallbackAfter: 2,
+      onFallback: () => {
+        if (!(t.useHi ? t.hls_hi : t.hls)) return false;   // sin HLS: sigue reintentando
+        t.player.stop();
+        startHls(t);
+        return true;
+      },
+    });
+  }
+  return t.player;
 }
 
 function playTile(t, hi) {
   t.useHi = !!hi;
   stopTile(t);
-  if (WEBRTC_OK && t.whep) startWebrtc(t);
-  else startHls(t);
-}
-
-async function startWebrtc(t) {
-  const url = t.useHi ? (t.whep_hi || t.whep) : t.whep;
-  const pc = new RTCPeerConnection({ iceServers: [] });
-  t.pc = pc;
-  pc.addTransceiver("video", { direction: "recvonly" });
-  pc.addTransceiver("audio", { direction: "recvonly" });
-  pc.ontrack = (ev) => { if (t.pc !== pc) return; t.video.srcObject = ev.streams[0]; t.video.play().catch(() => {}); t.retry = 0; };
-  pc.onconnectionstatechange = () => {
-    if (t.pc !== pc) return;
-    if (["failed", "disconnected", "closed"].includes(pc.connectionState)) retryTile(t);
-  };
-  try {
-    await pc.setLocalDescription(await pc.createOffer());
-    await gatherIce(pc);
-    if (t.pc !== pc) return;
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/sdp" }, body: pc.localDescription.sdp });
-    if (!res.ok) throw new Error("WHEP " + res.status);
-    const loc = res.headers.get("Location");
-    if (loc) { try { t.resource = new URL(loc, location.href).href; } catch (_) {} }
-    const answer = await res.text();
-    if (t.pc !== pc) return;
-    await pc.setRemoteDescription({ type: "answer", sdp: answer });
-  } catch (e) { retryTile(t); }
-}
-
-function retryTile(t) {
-  if (t.retryTimer) return;
-  closePc(t);
-  t.retry = (t.retry || 0) + 1;
-  if (t.retry > 2 && (t.useHi ? t.hls_hi : t.hls)) { startHls(t); return; }   // 2 fallos → HLS
-  t.retryTimer = setTimeout(() => { t.retryTimer = null; startWebrtc(t); }, Math.min(1000 * 2 ** (t.retry - 1), 8000));
+  if (WEBRTC_OK && t.whep) {
+    const p = tvPlayer(t);
+    p.url = t.useHi ? (t.whep_hi || t.whep) : t.whep;
+    p.start();
+  } else startHls(t);
 }
 
 function startHls(t) {
@@ -83,14 +63,8 @@ function startHls(t) {
   }
 }
 
-function closePc(t) {
-  if (t.pc) { try { t.pc.close(); } catch (_) {} t.pc = null; }
-  if (t.resource) { try { fetch(t.resource, { method: "DELETE", keepalive: true }).catch(() => {}); } catch (_) {} t.resource = null; }
-}
-
 function stopTile(t) {
-  if (t.retryTimer) { clearTimeout(t.retryTimer); t.retryTimer = null; }
-  closePc(t);
+  if (t.player) t.player.stop();
   if (t.hlsPlayer) { try { t.hlsPlayer.destroy(); } catch (_) {} t.hlsPlayer = null; }
   if (t.video) { try { t.video.srcObject = null; t.video.removeAttribute("src"); t.video.load(); } catch (_) {} }
 }
