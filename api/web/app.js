@@ -272,7 +272,8 @@ $("#btnStop").addEventListener("click", async () => {
 
 $("#btnClearAll").addEventListener("click", async () => {
   if (state.devices.size === 0) return;
-  if (!confirm(`¿Borrar los ${state.devices.size} equipos del inventario? No se puede deshacer; las grabaciones ya guardadas no se tocan.`)) return;
+  if (!(await uiConfirm(`¿Borrar los ${state.devices.size} equipos del inventario? No se puede deshacer; las grabaciones ya guardadas no se tocan.`,
+        { okLabel: "Borrar todo", danger: true }))) return;
   try {
     const r = await api("/api/devices", { method: "DELETE" });
     toast(`${r.removed} equipos borrados`);
@@ -404,7 +405,7 @@ function renderDevice(dev, animate) {
   `;
 
   card.querySelector('[data-act="rename"]').addEventListener("click", async () => {
-    const name = prompt("Nombre para este equipo", dev.name || "");
+    const name = await uiPrompt("Nombre para este equipo", { value: dev.name || "", okLabel: "Guardar" });
     if (name === null) return;
     try {
       await api(`/api/devices/${dev.id}`, {
@@ -418,7 +419,7 @@ function renderDevice(dev, animate) {
   card.querySelector('[data-act="osd"]').addEventListener("click", () => openOsdModal(dev));
 
   card.querySelector('[data-act="forget"]').addEventListener("click", async () => {
-    if (!confirm(`¿Quitar ${dev.host} del inventario?`)) return;
+    if (!(await uiConfirm(`¿Quitar ${dev.host} del inventario?`, { okLabel: "Quitar", danger: true }))) return;
     try {
       await api(`/api/devices/${dev.id}`, { method: "DELETE" });
       state.devices.delete(dev.id);
@@ -2565,9 +2566,10 @@ $("#waPair").addEventListener("click", async () => {
 });
 
 $("#waUnlink").addEventListener("click", async () => {
-  if (!confirm("¿Desvincular el WhatsApp que envía las alertas?\n\n" +
+  if (!(await uiConfirm("¿Desvincular el WhatsApp que envía las alertas?\n\n" +
       "Dejarán de salir avisos hasta que vincules otro dispositivo " +
-      "(los pendientes esperan en cola). Los números destinatarios y las reglas se conservan.")) return;
+      "(los pendientes esperan en cola). Los números destinatarios y las reglas se conservan.",
+      { okLabel: "Desvincular", danger: true }))) return;
   const btn = $("#waUnlink"); btn.disabled = true;
   try {
     await api("/api/settings/whatsapp/unlink", { method: "POST" });
@@ -2739,7 +2741,7 @@ async function paintAlertPanel(opts) {
     });
     const del = document.createElement("button"); del.className = "ghost small"; del.textContent = "Quitar";
     del.addEventListener("click", async () => {
-      if (!confirm(`¿Quitar a ${r.name} (${fmtPhone(r.phone)}) de las alertas?`)) return;
+      if (!(await uiConfirm(`¿Quitar a ${r.name} (${fmtPhone(r.phone)}) de las alertas?`, { okLabel: "Quitar", danger: true }))) return;
       try { await api(`/api/settings/alerts/recipients/${r.id}`, { method: "DELETE" }); loadAlertPanel(); }
       catch (e) { toast(e.message, true); }
     });
@@ -3817,7 +3819,7 @@ function userRow(u) {
   });
 
   li.querySelector("[data-pass]").addEventListener("click", async () => {
-    const pass = prompt(`Nueva contraseña para ${u.username} (≥4):`);
+    const pass = await uiPrompt(`Nueva contraseña para ${u.username} (≥4):`, { type: "password", okLabel: "Cambiar" });
     if (!pass) return;
     if (pass.length < 4) return toast("Mínimo 4 caracteres", true);
     try { await api(`/api/users/${u.id}`, { method: "PUT", body: JSON.stringify({ password: pass }) });
@@ -3825,7 +3827,7 @@ function userRow(u) {
   });
 
   li.querySelector("[data-del]").addEventListener("click", async () => {
-    if (!confirm(`¿Borrar al usuario ${u.username}?`)) return;
+    if (!(await uiConfirm(`¿Borrar al usuario ${u.username}?`, { okLabel: "Borrar", danger: true }))) return;
     try { await api(`/api/users/${u.id}`, { method: "DELETE" }); toast("Usuario borrado"); loadUsers(); }
     catch (err) { toast(err.message, true); }
   });
