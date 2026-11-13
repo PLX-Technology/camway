@@ -380,7 +380,9 @@ class Notifier:
         with open(os.path.join(ALERT_DIR, aid + ".jpg"), "wb") as fh:
             fh.write(jpeg)
         self._save_meta(meta)
-        self.log.appendleft({"id": aid, "ts": ts, "camera": meta["camera"], "cls": cls,
+        # `stream_id` permite filtrar el historial por las cámaras de cada usuario.
+        self.log.appendleft({"id": aid, "ts": ts, "stream_id": sid,
+                             "camera": meta["camera"], "cls": cls,
                              "score": meta["score"], "test": test, "status": "en cola"})
         log.info("aviso en cola %s (%s %s %.0f%%)", aid, meta["camera"], cls, score * 100)
         self._wake.set()

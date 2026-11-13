@@ -574,7 +574,10 @@ COOKIE_NAME = "camway_session"
 # /live, muro, fotogramas, WHEP, detecciones). Las acciones de ADMIN siguen
 # exigiendo login real. Seguro porque solo el localhost de esa PC lo alcanza.
 KIOSK = os.environ.get("CAMWAY_KIOSK", "").strip().lower() in ("1", "true", "yes", "si")
-_KIOSK_USER = {"id": -1, "username": "kiosko", "role": "viewer", "cameras": None, "_kiosk": True}
+# «Ve todas las cámaras» NO se expresa con cameras=None (rompía set(...) y listas):
+# `cameras` es siempre una lista y `_kiosk` es la marca; todo el código pregunta
+# por `_user_sees_all(user)` y nunca por `user["cameras"]` directamente.
+_KIOSK_USER = {"id": -1, "username": "kiosko", "role": "viewer", "cameras": [], "_kiosk": True}
 
 # Rutas sin sesión: estáticos, login, y las que consumen los contenedores
 # internos (detector y el proxy Blue Iris que jala MediaMTX).
@@ -623,6 +626,14 @@ def _is_admin_path(path: str, method: str) -> bool:
     # grabado es GET y queda sujeto al permiso por cámara, no a admin.)
     if path.startswith("/api/recordings") and method in ("POST", "PUT", "DELETE"):
         return True
+    # Detener el mosaico del servidor lo apaga para todos: solo admin. (Armarlo,
+    # POST, lo hace cada usuario con SUS cámaras: ver mosaic_set.)
+    if path == "/api/mosaic" and method == "DELETE":
+        return True
+    # Config completa de grabación y redetección de PTZ: la segunda devuelve las
+    # credenciales ONVIF de las cámaras PTZ, así que solo admin (cualquier método).
+    if path in ("/api/recordings/config", "/api/ptz/refresh"):
+        return True
     return False
 
 
@@ -660,13 +671,35 @@ async def auth_gate(request: Request, call_next):
     return await call_next(request)
 
 
+def _user_sees_all(user: Optional[dict]) -> bool:
+    """Admin y kiosko local ven todas las cámaras; el resto, solo las asignadas."""
+    return bool(user) and (user["role"] == "admin" or bool(user.get("_kiosk")))
+
+
 def _user_allows(request: Request, device_id: str) -> bool:
     u = getattr(request.state, "user", None)
     if not u:
         return False
-    if u["role"] == "admin" or u.get("_kiosk"):   # kiosko local ve todas
+    if _user_sees_all(u):
         return True
     return device_id in set(u.get("cameras") or [])
+
+
+def _stream_by_route(name: str) -> Optional[dict]:
+    """Stream cuya ruta de MediaMTX es `name`, con la MISMA regla con la que se
+    arma el mosaico (`_published_cams`): `mtx_name` o, si está vacío, safe_name(id)."""
+    s = store.stream_by_mtx(name)
+    if s:
+        return s
+    for cand in store.streams():
+        if (cand["mtx_name"] or safe_name(cand["id"])) == name:
+            return cand
+    return None
+
+
+def _sees_all(request: Request) -> bool:
+    """Admin y kiosko local ven todas las cámaras."""
+    return _user_sees_all(getattr(request.state, "user", None))
 
 
 def _require_camera(request: Request, device_id: str) -> None:
@@ -1166,9 +1199,20 @@ async def whep_offer(name: str, request: Request):
     del mismo origen, para que el navegador pueda hacerle DELETE al cerrar."""
     sname = safe_name(name)
     if sname == "mosaico":
-        # Mosaico del servidor: NO es un stream del inventario. Cualquier usuario
-        # autenticado puede leerlo (se compuso con SUS cámaras permitidas).
-        pass
+        # Mosaico del servidor: NO es un stream del inventario y es UNO solo para
+        # todos (un ffmpeg). Lo arma quien llamó último a POST /api/mosaic, así
+        # que puede contener cámaras que ESTE usuario no tiene: si es así, 403
+        # (el cliente debe volver a pedir su mosaico con POST /api/mosaic).
+        if not _sees_all(request):
+            names = server_mosaic.current_names()
+            if not names:
+                raise HTTPException(404, "mosaico no armado")
+            for n in names:
+                s = _stream_by_route(n)
+                # Falla CERRADO: un nombre que no resuelve a ninguna cámara
+                # conocida no se deja pasar (podría ser una cámara ajena).
+                if not s or not _user_allows(request, s["device_id"]):
+                    raise HTTPException(403, "el mosaico actual incluye cámaras que no tienes asignadas")
     else:
         # La ruta auxiliar del substream es "<primario>__lo": para el permiso se
         # busca por el nombre PRIMARIO (el __lo no es el mtx_name de ningún stream).
@@ -1213,12 +1257,12 @@ async def detections_stream(request: Request):
     """SSE que consume el mosaico para disparar alarmas sin correr el modelo.
     Un viewer solo recibe eventos de sus cámaras permitidas."""
     user = request.state.user
-    is_admin = user["role"] == "admin"
-    allowed = set(user.get("cameras", []))
+    sees_all = _user_sees_all(user)          # admin o kiosko (cameras no se mira)
+    allowed = set(user.get("cameras") or [])
     dev_of: dict[str, str] = {}   # stream_id -> device_id (cache)
 
     def visible(stream_id: str) -> bool:
-        if is_admin:
+        if sees_all:
             return True
         did = dev_of.get(stream_id)
         if did is None:
@@ -1667,6 +1711,10 @@ async def mosaic_set(request: Request, payload: dict = Body(default={})):
     N. Devuelve el whep del mosaico + las celdas (para etiquetas y para maximizar
     una cámara con su stream directo)."""
     cams = _published_cams(request)
+    if not cams and not _sees_all(request):
+        # Sin cámaras propias no hay nada que componer, y el mosaico es compartido:
+        # no dejar que alguien sin cámaras desmonte el de los demás.
+        raise HTTPException(403, "no tienes cámaras asignadas")
     try:
         layout = int(payload.get("layout") or 4)
         page = int(payload.get("page") or 0)
@@ -1680,8 +1728,9 @@ async def mosaic_set(request: Request, payload: dict = Body(default={})):
 
 
 @app.delete("/api/mosaic")
-async def mosaic_stop():
-    """Detiene el ffmpeg del mosaico y retira la ruta."""
+async def mosaic_stop(request: Request):
+    """Detiene el ffmpeg del mosaico y retira la ruta. Solo admin (afecta a todos)."""
+    _require_admin(request)
     await server_mosaic.stop(mtx)
     return {"ok": True}
 
@@ -1999,7 +2048,10 @@ async def refresh_ptz() -> dict:
 
 
 @app.post("/api/ptz/refresh")
-async def ptz_refresh():
+async def ptz_refresh(request: Request):
+    # Devuelve la config PTZ COMPLETA, con usuario y clave ONVIF de cada cámara:
+    # solo admin (además del middleware, por si cambia el prefijo).
+    _require_admin(request)
     return {"ptz": await refresh_ptz()}
 
 
@@ -2197,7 +2249,7 @@ async def talk_ws(ws: WebSocket, stream_id: str):
         return
     # Auth por cookie (el middleware HTTP no corre en WebSockets).
     user = store.session_user(ws.cookies.get(COOKIE_NAME, ""))
-    if not user or (user["role"] != "admin" and s["device_id"] not in set(user.get("cameras", []))):
+    if not user or not (_user_sees_all(user) or s["device_id"] in set(user.get("cameras") or [])):
         await ws.close(code=4403)
         return
     cfg = _talk_cfg(s["device_id"])
@@ -2286,6 +2338,7 @@ async def _republish_device(device_id: str, include_lo: bool = True) -> None:
 @app.get("/api/recordings/config")
 async def recordings_config(request: Request):
     """Toda la config de grabación (admin). Por defecto vacío = nada graba."""
+    _require_admin(request)
     return {"recording": store.get("recording") or {}}
 
 
@@ -2606,17 +2659,32 @@ async def delete_credential(cred_id: int):
     return {"ok": True}
 
 
-@app.get("/api/settings")
-async def get_settings():
-    return {
-        "cidr": store.get("cidr", DEFAULT_CIDR),
-        "ports": store.get("ports", [554, 8554, 10554, 5554]),
-        "channels": store.get("channels", 8),
-        "concurrency": store.get("concurrency", 200),
-        "connect_timeout": store.get("connect_timeout", 1.2),
+def _settings_view(full: bool) -> dict:
+    """Ajustes para el panel. `app.js` los pide al arrancar con CUALQUIER rol
+    (`loadSettings`) y hace `s.ports.join(...)`, así que la forma no cambia: a un
+    no-admin se le vacían los valores de red (segmento, puertos, tiempos) y solo
+    se le dan el logo y el nombre del sitio (que ya son públicos en /api/me)."""
+    out = {
         "logo": store.get("logo", ""),
         "site_name": store.get("site_name", "") or "",
     }
+    if full:
+        out.update({
+            "cidr": store.get("cidr", DEFAULT_CIDR),
+            "ports": store.get("ports", [554, 8554, 10554, 5554]),
+            "channels": store.get("channels", 8),
+            "concurrency": store.get("concurrency", 200),
+            "connect_timeout": store.get("connect_timeout", 1.2),
+        })
+    else:
+        out.update({"cidr": "", "ports": [], "channels": None,
+                    "concurrency": None, "connect_timeout": None})
+    return out
+
+
+@app.get("/api/settings")
+async def get_settings(request: Request):
+    return _settings_view(request.state.user["role"] == "admin")
 
 
 @app.post("/api/settings")
@@ -2626,7 +2694,7 @@ async def set_settings(payload: dict = Body(...)):
             store.set(key, payload[key])
     if "site_name" in payload:                  # nombre del taladro/sitio de esta instancia
         store.set("site_name", " ".join(str(payload["site_name"] or "").split())[:60])
-    return await get_settings()
+    return _settings_view(True)               # POST solo lo alcanza admin (auth_gate)
 
 
 def _recipient_view(r: dict) -> dict:
@@ -2634,27 +2702,51 @@ def _recipient_view(r: dict) -> dict:
             "enabled": r.get("enabled", True)}
 
 
+def _can_manage_alerts(request: Request) -> bool:
+    """Admin y jefe de seguridad gestionan los avisos (destinatarios y reglas).
+    El resto (viewer, kiosko) no ve teléfonos ni el estado del envío."""
+    return request.state.user["role"] in ("admin", "seguridad")
+
+
+def _require_alert_manager(request: Request) -> None:
+    if not _can_manage_alerts(request):
+        raise HTTPException(403, "requiere administrador o jefe de seguridad")
+
+
 @app.get("/api/settings/alerts")
 async def get_alert_settings(request: Request):
     """Avisos por WhatsApp/correo: canales listos (por entorno), destinatarios,
-    reglas por cámara y historial. No devuelve secretos. Quien no es admin solo
-    ve las reglas de SUS cámaras."""
+    reglas por cámara y historial. No devuelve secretos.
+
+    - admin: todo.
+    - seguridad: destinatarios (los gestiona), pero reglas e historial solo de
+      SUS cámaras.
+    - resto (viewer, kiosko): sin destinatarios (teléfonos), sin cola ni estado
+      de WhatsApp; reglas e historial solo de sus cámaras."""
     rec = notifier.recipients()
+    manager = _can_manage_alerts(request)
     cams = {}
     for sid in notifier.rules():
         s = store.stream(sid)
         if s and _user_allows(request, s["device_id"]):
             cams[sid] = notifier.rule(sid)
+
+    def _visible(entry: dict) -> bool:
+        if request.state.user["role"] == "admin":
+            return True
+        s = store.stream(entry.get("stream_id") or "")
+        return bool(s) and _user_allows(request, s["device_id"])
+
     return {
         "channels": notifmod.channels(sum(1 for r in rec if r.get("enabled", True))),
         "site": notifier.site(),
-        "recipients": [_recipient_view(r) for r in rec],
+        "recipients": [_recipient_view(r) for r in rec] if manager else [],
         "cameras": cams,
         "defaults": notifmod.DEFAULT_RULE,
         "labels": notifmod.LABELS,
-        "pending": notifier.pending(),
-        "log": list(notifier.log)[:30],
-        "wa_state": (await notifier.wa_status())["state"],
+        "pending": notifier.pending() if manager else 0,
+        "log": [e for e in list(notifier.log) if _visible(e)][:30],
+        "wa_state": (await notifier.wa_status())["state"] if manager else "",
     }
 
 
@@ -2698,7 +2790,8 @@ async def whatsapp_unlink(request: Request):
 
 
 @app.post("/api/settings/alerts/recipients")
-async def add_alert_recipient(payload: dict = Body(...)):
+async def add_alert_recipient(request: Request, payload: dict = Body(...)):
+    _require_alert_manager(request)
     try:
         rec = notifier.add_recipient(payload.get("name", ""), payload.get("phone", ""))
     except ValueError as e:
@@ -2714,7 +2807,8 @@ async def add_alert_recipient(payload: dict = Body(...)):
 
 
 @app.put("/api/settings/alerts/recipients/{rid}")
-async def put_alert_recipient(rid: str, payload: dict = Body(...)):
+async def put_alert_recipient(rid: str, request: Request, payload: dict = Body(...)):
+    _require_alert_manager(request)
     try:
         return {"recipient": _recipient_view(notifier.update_recipient(rid, payload))}
     except KeyError:
@@ -2722,14 +2816,16 @@ async def put_alert_recipient(rid: str, payload: dict = Body(...)):
 
 
 @app.delete("/api/settings/alerts/recipients/{rid}")
-async def delete_alert_recipient(rid: str):
+async def delete_alert_recipient(rid: str, request: Request):
+    _require_alert_manager(request)
     notifier.delete_recipient(rid)
     return {"ok": True}
 
 
 @app.post("/api/settings/alerts/recipients/{rid}/test")
-async def test_alert_recipient(rid: str):
+async def test_alert_recipient(rid: str, request: Request):
     """Mensaje de PRUEBA (solo texto) a UN número, para confirmar que le llega."""
+    _require_alert_manager(request)
     rec = next((r for r in notifier.recipients() if r["id"] == rid), None)
     if not rec:
         raise HTTPException(404, "destinatario desconocido")
@@ -2778,9 +2874,11 @@ async def test_alert(request: Request, payload: dict = Body(...)):
 
 
 @app.get("/api/settings/encoding")
-async def get_encoding_settings():
+async def get_encoding_settings(request: Request):
     """Parámetros de calidad del transcode (resolución, fps, bitrate) + espacio
-    de disco y nº de cámaras grabando, para estimar días de grabación en la UI."""
+    de disco y nº de cámaras grabando, para estimar días de grabación en la UI.
+    Solo admin: el panel solo lo pide en Ajustes de administrador."""
+    _require_admin(request)
     import shutil
     try:
         du = shutil.disk_usage(RECORD_DIR)
