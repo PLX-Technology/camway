@@ -1729,6 +1729,38 @@ function refreshAiButton(ctrl) {
   ctrl.aiBtn.classList.toggle("on", !!ctrl.config.enabled);
 }
 
+// Carga un <script> una sola vez; la promesa se comparte entre llamadas.
+const scriptLoads = new Map();
+function loadScriptOnce(src) {
+  if (!scriptLoads.has(src)) {
+    scriptLoads.set(src, new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = src;
+      el.onload = resolve;
+      el.onerror = () => {
+        scriptLoads.delete(src);   // permite reintentar
+        el.remove();
+        reject(new Error("no cargó TensorFlow.js (¿sin conexión con el servidor?)"));
+      };
+      document.head.appendChild(el);
+    }));
+  }
+  return scriptLoads.get(src);
+}
+
+// tf.min.js primero (coco-ssd lo necesita), luego coco-ssd. Si ya están en la
+// página (p. ej. un index.html que aún los incluya) no se vuelven a pedir.
+let tfLoading = null;
+function loadTensorflow() {
+  if (typeof cocoSsd !== "undefined") return Promise.resolve();
+  if (!tfLoading) {
+    tfLoading = (typeof tf !== "undefined" ? Promise.resolve() : loadScriptOnce("/static/vendor/tf.min.js"))
+      .then(() => loadScriptOnce("/static/vendor/coco-ssd.min.js"))
+      .catch((err) => { tfLoading = null; throw err; });
+  }
+  return tfLoading;
+}
+
 // El motor comparte un solo modelo y recorre las tejas activas en ronda, para
 // no ahogar el navegador corriendo la detección de todas a la vez.
 const aiEngine = {
@@ -1742,11 +1774,13 @@ const aiEngine = {
   async ensureModel() {
     if (this.model) return this.model;
     if (!this.loading) {
-      if (typeof cocoSsd === "undefined") {
-        throw new Error("no cargó TensorFlow.js (¿sin internet?)");
-      }
-      // Modelo alojado local (no baja de Google): 100% offline.
-      this.loading = cocoSsd.load({ modelUrl: "/static/vendor/coco-ssd/model.json" });
+      // TensorFlow.js y coco-ssd (~15 MB) se bajan solo cuando alguien activa la
+      // IA del navegador, una única vez (promesa compartida). Si falla, se
+      // descarta la promesa para poder reintentar.
+      this.loading = loadTensorflow()
+        // Modelo alojado local (no baja de Google): 100% offline.
+        .then(() => cocoSsd.load({ modelUrl: "/static/vendor/coco-ssd/model.json" }))
+        .catch((err) => { this.loading = null; throw err; });
     }
     this.model = await this.loading;
     return this.model;
