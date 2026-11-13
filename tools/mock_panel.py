@@ -565,7 +565,7 @@ class Handler(BaseHTTPRequestHandler):
     def gate(self, path: str, method: str):
         if path in PUBLIC_EXACT:
             return SESSION["user"]
-        if path.startswith("/api/detector") or path.startswith("/bi/"):
+        if (path.startswith("/api/detector") and path != "/api/detector/status")                 or path.startswith("/bi/"):
             return None                       # interno (el mock solo recibe localhost)
         user = SESSION["user"]
         if not user and ARGS.role == "kiosk" and not is_admin_path(path, method):
@@ -879,6 +879,15 @@ class Handler(BaseHTTPRequestHandler):
         # ---- detecciones
         if path == "/api/detections" and method == "GET":
             return self._sse_detections()
+        if path == "/api/detector/status" and method == "GET":
+            # A7: como main.py. --detector on|off decide `online`; --detector-models,
+            # qué modelos declara (general/epp/fuego).
+            on = ARGS.detector == "on"
+            have = set(ARGS.detector_models.split(",")) if on else set()
+            return self.json({
+                "online": on, "last_seen": (time.time() - 2) if on else (time.time() - 600),
+                "models": {"general": "general" in have, "epp": "epp" in have,
+                           "fuego": "fuego" in have}})
         if path == "/api/detector/targets" and method == "GET":
             # Como main.py: unión de los `targets` de las configs de IA activas, más
             # lo que piden las reglas de aviso (head → epp, fuego/humo → fuego).
@@ -1334,6 +1343,9 @@ def main(argv=None) -> int:
                     help="modo por defecto del mosaico (frames = fotogramas fijos, sin WHEP)")
     ap.add_argument("--detector", choices=("on", "off"), default="on",
                     help="on: /api/health dice detector=true (el panel usa SSE y no carga el modelo)")
+    ap.add_argument("--detector-models", default="general,epp",
+                    help="modelos que declara el detector en /api/detector/status "
+                         "(general,epp,fuego; por defecto sin fuego para probar ese caso)")
     ap.add_argument("--no-detections", action="store_true",
                     help="no emitir detecciones falsas cada 8 s por /api/detections")
     ap.add_argument("--verbose", action="store_true", help="registrar cada petición")

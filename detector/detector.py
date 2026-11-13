@@ -23,7 +23,7 @@ import numpy as np
 import requests
 
 from ppe_two_step import detect_heads
-from yolo import Yolo, fire_model, ppe_model
+from yolo import FIRE_PATH, PPE_PATH, Yolo, fire_model, ppe_model
 
 API = os.environ.get("CAMWAY_API", "http://api:8000")
 POLL_TARGETS_S = 2.0   # aplicar activar/desactivar IA casi de inmediato
@@ -82,12 +82,20 @@ _ppe_lock = threading.Lock()
 _ppe_model = None
 
 
+_load_failed: set = set()    # modelos cuya carga (o descarga) falló la última vez
+
+
 def get_fire():
     global _fire_model
     with _fire_lock:
         if _fire_model is None:
             print("[detector] cargando modelo de fuego/humo…", flush=True)
-            _fire_model = fire_model()
+            try:
+                _fire_model = fire_model()
+            except Exception:
+                _load_failed.add("fuego")
+                raise
+            _load_failed.discard("fuego")
             print("[detector] modelo fuego/humo listo", flush=True)
     return _fire_model
 
@@ -97,9 +105,34 @@ def get_ppe():
     with _ppe_lock:
         if _ppe_model is None:
             print("[detector] cargando modelo de EPP (sin casco)…", flush=True)
-            _ppe_model = ppe_model()
+            try:
+                _ppe_model = ppe_model()
+            except Exception:
+                _load_failed.add("epp")
+                raise
+            _load_failed.discard("epp")
             print("[detector] modelo EPP listo", flush=True)
     return _ppe_model
+
+
+def _model_file_ok(path: str) -> bool:
+    try:
+        return os.path.getsize(path) > 1_000_000
+    except OSError:
+        return False
+
+
+def available_models() -> list:
+    """Modelos que ESTE detector puede usar ya: `general` (COCO, se carga al
+    arrancar), y `epp`/`fuego` si están cargados o su archivo ya está descargado
+    (se cargan al activarlos, sin internet) y no falló su última carga. Se
+    declaran a la API en cada consulta de targets (→ GET /api/detector/status)."""
+    out = ["general"]
+    if "epp" not in _load_failed and (_ppe_model is not None or _model_file_ok(PPE_PATH)):
+        out.append("epp")
+    if "fuego" not in _load_failed and (_fire_model is not None or _model_file_ok(FIRE_PATH)):
+        out.append("fuego")
+    return out
 
 
 def point_in_poly(x: float, y: float, poly) -> bool:
@@ -415,7 +448,8 @@ class CameraWorker(threading.Thread):
 
 def load_targets():
     try:
-        r = requests.get(f"{API}/api/detector/targets", timeout=5)
+        r = requests.get(f"{API}/api/detector/targets",
+                         params={"models": ",".join(available_models())}, timeout=5)
         r.raise_for_status()
         return {t["stream_id"]: t for t in r.json().get("targets", [])}
     except requests.RequestException:
