@@ -1,6 +1,16 @@
+# Logs de Docker con tope: sin esto el log json de un contenedor crece sin límite
+# (el 15/11/2026 el de camway-api llegó a 9,9 GB y llenó el disco del .135,
+# tumbando todo). 10 MB × 3 archivos por servicio = 30 MB como máximo cada uno.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
   api:
+    logging: *default-logging
     build: ./api
     container_name: camway-api
     restart: unless-stopped
@@ -74,6 +84,7 @@ services:
     cpus: 2.5
 
   mediamtx:
+    logging: *default-logging
     # La variante -ffmpeg es obligatoria: sin ella no se pueden transcodificar
     # las cámaras MJPEG o H.265, que WebRTC no admite tal cual.
     image: bluenviron/mediamtx:latest-ffmpeg
@@ -116,6 +127,7 @@ services:
       retries: 3
 
   detector:
+    logging: *default-logging
     build: ./detector
     container_name: camway-detector
     restart: unless-stopped
@@ -145,6 +157,7 @@ services:
   # Conector IMOU Open API (opcional): trae una cámara IMOU "solo nube" por su
   # API y la empuja como RTSP local a MediaMTX. Solo arranca si hay credenciales.
   imou:
+    logging: *default-logging
     build: ./imou
     container_name: camway-imou
     restart: unless-stopped
@@ -170,6 +183,7 @@ services:
   # Solo la API de CamWay lo alcanza (red interna); al host se publica únicamente
   # en 127.0.0.1 para sacar el QR. Activar con COMPOSE_PROFILES=alertas en .env.
   evo-db:
+    logging: *default-logging
     image: postgres:16-alpine
     container_name: camway-evo-db
     restart: unless-stopped
@@ -189,6 +203,7 @@ services:
     cpus: 0.5
 
   evolution:
+    logging: *default-logging
     image: evoapicloud/evolution-api:v2.3.7
     container_name: camway-evolution
     restart: unless-stopped

@@ -222,13 +222,22 @@ async function pollHealth() {
   try {
     const h = await api("/api/health");
     lastHealth = h;
-    $("#dotApi").className = "dot on";
+    // Disco casi lleno: el punto «Servidor» de la cabecera lo avisa siempre, no solo en
+    // Ajustes › Salud (un disco lleno tumbó el servidor el 15/11/2026).
+    const free = typeof h.disk_free_pct === "number" ? h.disk_free_pct : null;
+    const diskLvl = free === null ? "on" : free < 8 ? "off" : free < 15 ? "warn" : "on";
+    const dot = $("#dotApi");
+    dot.className = "dot " + diskLvl;
+    const msg = diskLvl === "on" ? "Servidor (API del panel)"
+      : `Servidor: disco casi lleno (${Math.round(free)} % libre). Libera espacio o el sistema puede caerse.`;
+    dot.title = msg; dot.setAttribute("aria-label", msg);
     $("#dotMtx").className = "dot " + (h.mediamtx ? "on" : "off");
     $("#tagDevices").textContent =
       h.devices === 1 ? "1 equipo" : `${h.devices} equipos`;
   } catch (_) {
     lastHealth = null;
     $("#dotApi").className = "dot off";
+    $("#dotApi").title = "Servidor: sin respuesta"; $("#dotApi").setAttribute("aria-label", "Servidor: sin respuesta");
     $("#dotMtx").className = "dot off";
   }
   renderHealthBasics();

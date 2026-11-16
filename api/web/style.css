@@ -103,6 +103,7 @@ a:hover { color: var(--cw-link-hover); }
 }
 .dot.on { background: var(--cw-ok); }
 .dot.off { background: var(--cw-bad); }
+.dot.warn { background: var(--cw-warn); }
 
 /* ---------------------------------------------------------- vistas */
 .view { display: none; padding: 20px; max-width: 1500px; margin: 0 auto; }
