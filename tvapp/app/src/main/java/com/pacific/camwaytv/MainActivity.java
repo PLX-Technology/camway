@@ -161,7 +161,9 @@ public class MainActivity extends Activity {
         opts.add("--network-caching=100");
         opts.add("--live-caching=100");
         opts.add("--clock-jitter=0");
-        opts.add("--clock-synchro=0");
+        // NO desactivar la sincronización de reloj (--clock-synchro=0): sin ella libVLC no descarta ni se pone al
+        // día tras una pausa de la app (GC, CPU del TV) y el atraso de esa pausa se queda para siempre en la celda
+        // (medido: parada de 8 s => +8 s fijos; con sincronización activa vuelve a ~1 s).
         opts.add("--drop-late-frames");
         opts.add("--skip-frames");
         // Ajuste fino (diagnóstico de latencia): opciones extra de libVLC separadas por coma desde las
@@ -601,7 +603,6 @@ public class MainActivity extends Activity {
             m.addOption(":network-caching=100");
             m.addOption(":live-caching=100");
             m.addOption(":clock-jitter=0");
-            m.addOption(":clock-synchro=0");
             m.addOption(":drop-late-frames");
             m.addOption(":skip-frames");
             for (String o : getSharedPreferences("camway", MODE_PRIVATE).getString("vlc_media_opts", "").split(",")) {
