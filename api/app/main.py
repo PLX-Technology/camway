@@ -462,6 +462,23 @@ async def _publish_lo(device_id: str, primary_name: str,
     return lo_name
 
 
+def _tv_source(s: dict, name: str) -> tuple[str, bool]:
+    """Fuente del flujo ligero `__tv` de la app TV: (url, ¿transcodificar?).
+
+    Por defecto sale del PRINCIPAL vía MediaMTX, transcodificado a 640 px (cuesta CPU
+    de decodificar 1080p en el servidor por cada celda). Si el stream tiene SUBFLUJO
+    configurado (setting `tvsub` = {stream_id: {"path": "/Streaming/channels/102",
+    "transcode": false}}), el `__tv` lo toma directamente de la cámara: sin transcodificar
+    si ya es H264 (CPU ~0), o transcodificando solo ese subflujo chico si es HEVC.
+    Solo afecta a `__tv`: el principal y su grabación no se tocan."""
+    cfg = (store.get("tvsub") or {}).get(s["id"])
+    if cfg and cfg.get("path"):
+        m = re.match(r"(rtsp://(?:[^@/]*@)?[^/]+)", s["url"] or "")
+        if m:
+            return m.group(1) + cfg["path"], bool(cfg.get("transcode"))
+    return f"rtsp://127.0.0.1:8554/{safe_name(name)}", True
+
+
 async def reconcile_published() -> dict:
     """Reempuja a MediaMTX todos los streams marcados como publicados."""
     ok = failed = 0
@@ -478,8 +495,8 @@ async def reconcile_published() -> dict:
             # volver a pedir /api/wall para que su ruta exista otra vez (misma lógica que /api/wall).
             q = _quality_cfg(s["device_id"])
             if TV_LITE and not (q and q.get("lo_url")):
-                await mtx.publish(f"{safe_name(name)}__tv", f"rtsp://127.0.0.1:8554/{safe_name(name)}",
-                                  tv_transcode=True)
+                tv_src, tv_tc = _tv_source(s, name)
+                await mtx.publish(f"{safe_name(name)}__tv", tv_src, tv_transcode=tv_tc)
         else:
             failed += 1
     if ok or failed:
@@ -1562,6 +1579,34 @@ async def set_quality(device_id: str, payload: dict = Body(...)):
     return {"ok": True, "quality": q.get(device_id)}
 
 
+@app.put("/api/devices/{device_id}/tvsub")
+async def set_tv_sub(device_id: str, payload: dict = Body(...)):
+    """Subflujo para la app TV (solo el `__tv`; la grabación y el principal no cambian).
+    payload: {"stream_id", "path": "/Streaming/channels/102", "transcode": bool}.
+    `path` vacío lo quita (vuelve a transcodificar el principal)."""
+    dev = store.device(device_id)
+    if not dev:
+        raise HTTPException(404, "equipo desconocido")
+    sid = payload.get("stream_id")
+    st = next((x for x in dev["streams"] if x["id"] == sid), None)
+    if not st:
+        raise HTTPException(404, "stream desconocido")
+    path = (payload.get("path") or "").strip()
+    if path and not path.startswith("/"):
+        raise HTTPException(400, "'path' debe empezar por /")
+    cfg = dict(store.get("tvsub") or {})
+    if path:
+        cfg[sid] = {"path": path, "transcode": bool(payload.get("transcode"))}
+    else:
+        cfg.pop(sid, None)
+    store.set("tvsub", cfg)
+    if TV_LITE and st["published"]:
+        name = st["mtx_name"] or safe_name(st["id"])
+        tv_src, tv_tc = _tv_source(st, name)
+        await mtx.publish(f"{safe_name(name)}__tv", tv_src, tv_transcode=tv_tc)
+    return {"ok": True, "tvsub": cfg.get(sid)}
+
+
 @app.delete("/api/devices/{device_id}")
 async def forget_device(device_id: str):
     dev = store.device(device_id)
@@ -1711,7 +1756,8 @@ async def wall(request: Request):
             if TV_LITE and not has_lo:
                 tv_name = f"{safe_name(primary)}__tv"
                 if tv_name not in runtime:
-                    await mtx.publish(tv_name, f"rtsp://127.0.0.1:8554/{safe_name(primary)}", tv_transcode=True)
+                    tv_src, tv_tc = _tv_source(s, primary)
+                    await mtx.publish(tv_name, tv_src, tv_transcode=tv_tc)
                     runtime[tv_name] = {}
             tiles.append({
                 "stream_id": s["id"],
