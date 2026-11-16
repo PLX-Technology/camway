@@ -47,6 +47,30 @@ logging.basicConfig(
 )
 log = logging.getLogger("camway")
 
+
+class _QuietAccess(logging.Filter):
+    """Saca del log de acceso de uvicorn las peticiones que se repiten sin parar:
+    fotogramas del muro (varios por segundo por cámara y por pantalla), llamadas del
+    detector, WHEP y sondeos de salud. Eran casi todo el log que llenó el disco el
+    15/11/2026. Los errores (4xx/5xx) de esas rutas SÍ se registran."""
+    _NOISY = ("/api/wall/", "/api/detector/", "/api/health", "/api/system/health",
+              "/api/detections", "/whep/", "/static/")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args if isinstance(record.args, tuple) else ()
+        if len(args) >= 5:
+            path, status = str(args[2]), args[4]
+            try:
+                ok = int(status) < 400
+            except (TypeError, ValueError):
+                ok = True
+            if ok and path.startswith(self._NOISY):
+                return False
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietAccess())
+
 WEB_DIR = os.environ.get("CAMWAY_WEB_DIR") \
     or os.path.join(os.path.dirname(os.path.dirname(__file__)), "web")
 DEFAULT_CIDR = os.environ.get("CAMWAY_DEFAULT_CIDR", "192.168.1.0/24")
