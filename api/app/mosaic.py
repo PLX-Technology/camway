@@ -140,9 +140,18 @@ class MosaicManager:
         pages = max(1, math.ceil(len(route_names_all) / per)) if route_names_all else 1
         page = max(0, min(int(page or 0), pages - 1))
         page_names = route_names_all[page * per: page * per + per]
-        cfg = (layout, page, tuple(page_names))
-        # Imagen de "sin señal" (logo CamWay) para las celdas vacías de este layout.
-        empty_img = await _ensure_empty(cw, ch) if len(page_names) < per else None
+        # Solo se componen las cámaras que están publicando (ready): una cámara
+        # caída devuelve 404 en su RTSP y tumba el ffmpeg del mosaico. Las caídas
+        # se dejan como None (celda "sin señal") y el mosaico se rearma solo
+        # cuando cambie la lista (el cfg incluye la marca de listas).
+        try:
+            ready = {name for name, p in (await mtx.runtime_paths()).items() if p.get("ready")}
+        except Exception:  # noqa: BLE001
+            ready = set(page_names)
+        page_ready = [n if n in ready else None for n in page_names]
+        cfg = (layout, page, tuple(page_ready))
+        # Imagen de "sin señal" (logo CamWay) para las celdas vacías o caídas.
+        empty_img = await _ensure_empty(cw, ch) if any(n is None for n in page_ready) else None
         async with self._lock:
             await mtx.ensure_publisher_path(MOSAIC_NAME)
             self._want = True
@@ -151,7 +160,7 @@ class MosaicManager:
                 pass                        # ya corre con esta config: no reiniciar
             else:
                 self._cfg = cfg
-                self._args = _ff_args(page_names, cols, rows, cw, ch, empty_img)
+                self._args = _ff_args(page_ready, cols, rows, cw, ch, empty_img)
                 await self._restart()
         return {"whep": f"/whep/{MOSAIC_NAME}", "layout": layout, "page": page,
                 "pages": pages, "cols": cols, "rows": rows, "per_page": per}
@@ -160,7 +169,7 @@ class MosaicManager:
         """Rutas (mtx_name) de las cámaras que componen el mosaico ahora mismo, o
         [] si no hay mosaico armado. Sirve para decidir quién puede verlo: el
         ffmpeg es UNO para todos, así que quien lo lea ve TODAS estas cámaras."""
-        return list(self._cfg[2]) if self._cfg else []
+        return [n for n in (self._cfg[2] if self._cfg else []) if n]
 
     async def _restart(self) -> None:
         # Mata el ffmpeg anterior si sigue vivo, SIN cancelar el _watch actual:
