@@ -163,7 +163,18 @@ class MosaicManager:
         return list(self._cfg[2]) if self._cfg else []
 
     async def _restart(self) -> None:
-        await self._kill()
+        # Mata el ffmpeg anterior si sigue vivo, SIN cancelar el _watch actual:
+        # _restart() puede venir del propio _watch (que si se cancelara a sí
+        # mismo abortaría este relanzamiento) o de set() (donde el _watch viejo
+        # sale solo al ver que self._proc cambió).
+        old = self._proc
+        self._proc = None
+        if old is not None and old.returncode is None:
+            try:
+                old.kill()
+                await old.wait()
+            except (ProcessLookupError, asyncio.CancelledError):
+                pass
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 *self._args, stdout=asyncio.subprocess.DEVNULL,
