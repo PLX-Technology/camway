@@ -26,6 +26,14 @@ BITRATE = os.environ.get("CAMWAY_MOSAIC_BITRATE", "3500k")
 # Tamaño de celda por layout (todo 16:9; total <= 1920x1080).
 _CELL = {1: (1280, 720), 4: (640, 360), 9: (480, 270), 16: (480, 270)}
 
+# Watchdog del mosaico: el ffmpeg puede quedar VIVO pero ATASCADO (sin publicar)
+# cuando una cámara se congela y se recupera. Como proc.wait() no lo detecta
+# (el proceso no muere), se comprueba cada _STALL_INTERVAL que la ruta 'mosaico'
+# siga 'ready' en MediaMTX; si no publica durante _STALL_CHECKS chequeos seguidos,
+# se mata y relanza.
+_STALL_INTERVAL = 10   # segundos entre chequeos
+_STALL_CHECKS = 3      # 3 chequeos sin publicar (~30 s) → reiniciar
+
 
 # Imagen de "sin señal" (fondo oscuro + logo CamWay semitransparente), cacheada
 # por tamaño de celda. Se usa para las celdas vacías del mosaico.
@@ -117,10 +125,12 @@ class MosaicManager:
         self._lock = asyncio.Lock()
         self._args: list = []
         self._cfg = None     # (layout, page, tuple(page_names)) en curso
+        self._mtx = None     # cliente MediaMTX para el watchdog (se fija en set())
 
     async def set(self, mtx, route_names_all, layout, page) -> dict:
         """(Re)arma el mosaico. `route_names_all` = nombres de ruta publicados,
         en orden. Devuelve whep + info de layout/paginado."""
+        self._mtx = mtx
         if layout not in _CELL:
             layout = 4
         cols = int(round(math.sqrt(layout))) if layout > 1 else 1
@@ -165,16 +175,40 @@ class MosaicManager:
         self._task = asyncio.create_task(self._watch(self._proc))
 
     async def _watch(self, proc) -> None:
-        try:
-            await proc.wait()
-        except asyncio.CancelledError:
-            return
-        # murió solo: si aún se quiere, relanzar con los mismos args
+        """Vigila el ffmpeg del mosaico: lo relanza si MUERE o si se ATASCA
+        (deja de publicar en MediaMTX aunque el proceso siga vivo)."""
+        stale = 0
+        while True:
+            await asyncio.sleep(_STALL_INTERVAL)
+            if not self._want or self._proc is not proc:
+                return
+            if proc.returncode is not None:
+                break                          # murió solo
+            if await self._is_publishing():
+                stale = 0
+            else:
+                stale += 1
+                if stale >= _STALL_CHECKS:
+                    log.warning("mosaico ffmpeg sin publicar durante %ds → reiniciando",
+                                stale * _STALL_INTERVAL)
+                    break
+        # (re)lanzar con los mismos args
         if self._want and self._proc is proc:
             await asyncio.sleep(2)
             async with self._lock:
                 if self._want and self._proc is proc:
                     await self._restart()
+
+    async def _is_publishing(self) -> bool:
+        """True si la ruta 'mosaico' está lista en MediaMTX (el ffmpeg publica)."""
+        if self._mtx is None:
+            return True                          # sin cliente: no reiniciar a ciegas
+        try:
+            paths = await self._mtx.runtime_paths()
+            p = paths.get(MOSAIC_NAME)
+            return bool(p and p.get("ready"))
+        except Exception:                        # noqa: BLE001
+            return True                          # ante la duda, no reiniciar
 
     async def _kill(self) -> None:
         if self._task:
