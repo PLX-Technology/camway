@@ -114,8 +114,8 @@ async def isapi_set_time(host: str, user: str, pwd: str,
 _DEV = "http://www.onvif.org/ver10/device/wsdl"
 _MEDIA = "http://www.onvif.org/ver10/media/wsdl"
 _SCHEMA = "http://www.onvif.org/ver10/schema"
-_DEV_PATHS = ("/onvif/device_service", "/onvif/Device")
-_MEDIA_PATHS = ("/onvif/media_service", "/onvif/Media", "/onvif/device_service")
+_DEV_PATHS = ("/onvif/device_service", "/onvif/Device", "/onvif/device")
+_MEDIA_PATHS = ("/onvif/media", "/onvif/media_service", "/onvif/Media", "/onvif/device_service")
 
 
 def _wss(user: str, pwd: str) -> str:
@@ -175,10 +175,19 @@ async def onvif_set_osd_text(host: str, user: str, pwd: str, name: str) -> dict:
     """Best-effort: localiza un OSD de texto y le pone `name`. El soporte de
     SetOSD varía por modelo → validar en el HJT real. Lanza si no se puede."""
     async with httpx.AsyncClient() as c:
-        path, r = await _soap(c, host, _MEDIA_PATHS, user, pwd, '<x:GetOSDs/>', _MEDIA)
+        # Prueba TODAS las rutas del servicio Media: algunas cámaras responden
+        # Fault en las rutas "estándar" y sirven GetOSDs en otra (p.ej. /onvif/media).
+        path = r = None
+        for p in _MEDIA_PATHS:
+            _p, _r = await _soap(c, host, (p,), user, pwd, '<x:GetOSDs/>', _MEDIA)
+            if _r is not None and "Fault" not in _r.text and "token=" in _r.text:
+                path, r = _p, _r
+                break
         if r is None or "OSD" not in r.text:
             raise RuntimeError("la cámara no expone OSD por ONVIF (GetOSDs)")
-        tok = re.search(r'OSD token="([^"]+)"', r.text) or re.search(r'<\w*:?OSD\b[^>]*token="([^"]+)"', r.text)
+        # El elemento puede ser <OSD token="..."> o <OSDs token="..."> (plural).
+        tok = (re.search(r'OSDs?\s+token="([^"]+)"', r.text)
+               or re.search(r'<\w*:?OSDs?\b[^>]*token="([^"]+)"', r.text))
         cfgtok = re.search(r'<\w*:?VideoSourceConfigurationToken>([^<]+)<', r.text)
         if not tok:
             raise RuntimeError("sin OSD de texto editable")
