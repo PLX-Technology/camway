@@ -195,4 +195,5 @@ se pueden descifrar.
 | El mosaico usaba 525 MB | 16 hilos de decodificación por cámara | Corregido: `-threads 2` → ~180 MB |
 | Tras un apagón el mosaico quedaba congelado 30 s | El watchdog solo miraba `ready` | Corregido: mira bytes publicados, RSS y rearma cámaras |
 | Al volver una cámara no reaparecía | La lista se calculaba solo al pedir el mosaico | Corregido: rearme automático |
-| Una cámara 4:3 (p. ej. `.32`, 704×576) no muestra el título ni la fecha/hora | El recorte a 16:9 se come el 15,6 % de arriba y de abajo, justo donde el fabricante pone su OSD | Corregido: CamWay pinta nombre + fecha/hora en cada celda (`MOSAIC_LABELS`) |
+| Una cámara 4:3 (p. ej. `.32`, 704×576) no muestra el título ni la fecha/hora | El recorte a 16:9 se come el 15,6 % de arriba y de abajo, justo donde el fabricante pone su OSD | Corregido: CamWay pinta la fecha/hora en esa celda (`MOSAIC_CLOCK=auto`) |
+| El reloj salía **duplicado** (dos fechas superpuestas) | La cámara 16:9 ya quema el suyo y el recorte no lo toca | Corregido: con `auto` solo se pinta donde el recorte borra el de la cámara |

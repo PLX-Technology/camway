@@ -41,6 +41,27 @@ _CELL = {1: (1280, 720), 4: (640, 360), 9: (480, 270), 16: (480, 270)}
 _FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 LABELS = os.environ.get("CAMWAY_MOSAIC_LABELS", "1") not in ("0", "false", "no", "")
 TITLE = os.environ.get("CAMWAY_MOSAIC_TITLE", "0") not in ("0", "false", "no", "")
+# Qué celdas llevan el reloj de CamWay:
+#   auto (defecto) → solo las que se RECORTAN al pasar a 16:9, porque ahí se
+#                    pierde el reloj que quema la propia cámara. Las cámaras
+#                    16:9 ya traen el suyo y pintar otro lo solaparía.
+#   all            → todas.  off → ninguna.
+CLOCK_MODE = (os.environ.get("CAMWAY_MOSAIC_CLOCK") or "auto").strip().lower()
+
+
+def _needs_clock(name: str, sizes: dict, cw: int, ch: int) -> bool:
+    """¿Hay que pintar el reloj en esta celda? Con `auto`, solo si la imagen
+    se recorta (relación de aspecto distinta a la celda), que es el caso en el
+    que el OSD de la cámara queda fuera del encuadre."""
+    if CLOCK_MODE == "off":
+        return False
+    if CLOCK_MODE == "all":
+        return True
+    wh = (sizes or {}).get(name)
+    if not wh or not wh[0] or not wh[1]:
+        return True                 # sin datos de resolución: pintar (no perderlo)
+    sw, sh = float(wh[0]), float(wh[1])
+    return abs((sw / sh) - (cw / ch)) > 0.02
 
 
 def _label_file(k: int, text: str) -> str:
@@ -152,7 +173,7 @@ async def _empty_for(page_ready, cw, ch):
     return await _ensure_empty(cw, ch)
 
 
-def _ff_args(route_names, cols, rows, cw, ch, empty_img=None, titles=None) -> list:
+def _ff_args(route_names, cols, rows, cw, ch, empty_img=None, titles=None, sizes=None) -> list:
     """Compone con `overlay` sobre un fondo que SIEMPRE late a 15 fps.
 
     Antes se usaba `xstack`: esa cadena exige un fotograma de TODAS las
@@ -206,7 +227,9 @@ def _ff_args(route_names, cols, rows, cw, ch, empty_img=None, titles=None) -> li
         idx += 1
         # Rótulo DESPUÉS del recorte: así el nombre y el reloj caen siempre
         # dentro de lo visible, incluso en cámaras 4:3 que pierden los bordes.
-        if name and LABELS and os.path.exists(_FONT):
+        # Solo se pinta el reloj donde se recorta: si la cámara ya trae el suyo
+        # (16:9 sin recorte) se dejaría duplicado.
+        if name and LABELS and os.path.exists(_FONT) and _needs_clock(name, sizes or {}, cw, ch):
             label = (titles or {}).get(name) or name
             fc[-1] = fc[-1].replace(f"[c{k}]", _drawtext(k, label, ch) + f"[c{k}]")
         # eof_action=repeat: si la entrada se acaba, deja el último fotograma
@@ -237,6 +260,7 @@ class MosaicManager:
         self._last_bytes = None   # bytes publicados en el chequeo anterior
         self._all_names: list = []    # todas las rutas publicadas (para repaginar/rearmar)
         self._titles: dict = {}       # {nombre_ruta: nombre visible} para el rótulo
+        self._sizes: dict = {}        # {nombre_ruta: (ancho, alto)} de la fuente
         self._layout = 4
         self._page = 0
         self._launched_at = 0.0       # monotonic del último arranque de ffmpeg
@@ -271,13 +295,14 @@ class MosaicManager:
         cw, ch = _CELL[layout]
         empty = await _empty_for(page_ready, cw, ch)
         self._cfg = cfg
-        self._args = _ff_args(page_ready, cols, rows, cw, ch, empty, self._titles)
+        self._args = _ff_args(page_ready, cols, rows, cw, ch, empty, self._titles, self._sizes)
         log.info("mosaico: cámaras vivas ahora %s", cfg[2])
         return True
 
-    async def set(self, mtx, route_names_all, layout, page, titles=None) -> dict:
+    async def set(self, mtx, route_names_all, layout, page, titles=None, sizes=None) -> dict:
         """(Re)arma el mosaico. `route_names_all` = nombres de ruta publicados,
-        en orden. `titles` = {nombre_ruta: nombre visible} para el rótulo.
+        en orden. `titles` = {nombre_ruta: nombre visible} para el rótulo;
+        `sizes` = {nombre_ruta: (ancho, alto)} para decidir si la celda recorta.
         Devuelve whep + info de layout/paginado."""
         self._mtx = mtx
         if layout not in _CELL:
@@ -289,6 +314,7 @@ class MosaicManager:
         self._layout = layout
         self._all_names = list(route_names_all or [])
         self._titles = dict(titles or {})
+        self._sizes = dict(sizes or {})
         pages = max(1, math.ceil(len(self._all_names) / per)) if self._all_names else 1
         page = max(0, min(int(page or 0), pages - 1))
         self._page = page
@@ -307,7 +333,7 @@ class MosaicManager:
                 pass                        # ya corre con esta config: no reiniciar
             else:
                 self._cfg = cfg
-                self._args = _ff_args(page_ready, cols, rows, cw, ch, empty_img, self._titles)
+                self._args = _ff_args(page_ready, cols, rows, cw, ch, empty_img, self._titles, self._sizes)
                 await self._restart()
         return {"whep": f"/whep/{MOSAIC_NAME}", "layout": layout, "page": page,
                 "pages": pages, "cols": cols, "rows": rows, "per_page": per}

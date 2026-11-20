@@ -1812,7 +1812,10 @@ def _published_cams(request: Request) -> list:
                 continue
             out.append({"name": name, "whep": mtx.whep_url(name),
                         "title": dev["name"] or f'{dev["host"]} {s["label"]}',
-                        "host": dev["host"]})
+                        "host": dev["host"],
+                        # Resolución de la fuente: decide si la celda recorta
+                        # (y por tanto si hay que pintar el reloj nosotros).
+                        "w": s.get("width"), "h": s.get("height")})
     return out
 
 
@@ -1836,7 +1839,8 @@ async def mosaic_set(request: Request, payload: dict = Body(default={})):
     except (TypeError, ValueError):
         layout, page = 4, 0
     info = await server_mosaic.set(mtx, [c["name"] for c in cams], layout, page,
-                                   titles={c["name"]: c["title"] for c in cams})
+                                   titles={c["name"]: c["title"] for c in cams},
+                                   sizes={c["name"]: (c.get("w"), c.get("h")) for c in cams})
     per = info["per_page"]
     info["cells"] = cams[info["page"] * per: info["page"] * per + per]
     info["total"] = len(cams)

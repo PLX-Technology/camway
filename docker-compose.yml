@@ -54,6 +54,9 @@ services:
       # El nombre de la cámara arriba a la izquierda. Apagado por defecto: solo
       # se pinta la barra inferior con la fecha/hora.
       CAMWAY_MOSAIC_TITLE: ${MOSAIC_TITLE:-0}
+      # Reloj de CamWay por celda: auto = solo donde el recorte a 16:9 se come
+      # el reloj que quema la propia cámara; all = todas; off = ninguna.
+      CAMWAY_MOSAIC_CLOCK: ${MOSAIC_CLOCK:-auto}
       # --- Avisos fuera de pantalla (foto por WhatsApp/correo). Todo opcional:
       # sin estas variables el canal queda "no configurado" y no se envía nada.
       CAMWAY_SITE_NAME: ${SITE_NAME:-Taladro}
