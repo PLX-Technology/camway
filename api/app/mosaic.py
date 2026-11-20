@@ -28,6 +28,43 @@ BITRATE = os.environ.get("CAMWAY_MOSAIC_BITRATE", "3500k")
 # Tamaño de celda por layout (todo 16:9; total <= 1920x1080).
 _CELL = {1: (1280, 720), 4: (640, 360), 9: (480, 270), 16: (480, 270)}
 
+# Rotulación quemada en el mosaico: nombre de la cámara arriba-izquierda y
+# fecha/hora abajo-derecha, dibujadas por CamWay con drawtext.
+#
+# Por qué aquí y no en la cámara: las celdas recortan la imagen para llenar el
+# 16:9, y una cámara 4:3 (p.ej. la .32, 704x576) pierde el 15,6 % de arriba y
+# el 15,6 % de abajo, que es justo donde el fabricante pone su OSD. Además el
+# OSD de la cámara no siempre se puede activar (las iCamra aceptan el SetOSD y
+# lo ignoran). Dibujarlo después del recorte garantiza que se vea siempre.
+# Desactivar con CAMWAY_MOSAIC_LABELS=0.
+_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+LABELS = os.environ.get("CAMWAY_MOSAIC_LABELS", "1") not in ("0", "false", "no", "")
+
+
+def _label_file(k: int, text: str) -> str:
+    """Escribe el nombre de la celda en un archivo: drawtext:textfile evita
+    todo el infierno de escapes (comillas, dos puntos, comas, %) del texto
+    en línea. Se reescribe en cada montaje del mosaico."""
+    path = f"/tmp/mosaic_label_{k}.txt"
+    clean = " ".join((text or "").split())[:30]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(clean or " ")
+    return path
+
+
+def _drawtext(k: int, label: str, ch: int) -> str:
+    """Filtros de rótulo para una celda (nombre + reloj)."""
+    fs = max(12, ch // 20)
+    box = f"fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=5"
+    # El reloj usa expansion=strftime: el formato se evalúa en cada fotograma;
+    # los ':' del formato van escapados para que el parser no los corte.
+    return (
+        f",drawtext=fontfile={_FONT}:textfile={_label_file(k, label)}"
+        f":x=8:y=6:fontsize={fs}:{box}"
+        f",drawtext=fontfile={_FONT}:text='%Y-%m-%d %H\\:%M\\:%S'"
+        f":expansion=strftime:x=w-tw-10:y=h-th-10:fontsize={fs}:{box}"
+    )
+
 # Watchdog del mosaico: el ffmpeg puede quedar VIVO pero ATASCADO (sin publicar)
 # cuando una cámara se congela y se recupera. Como proc.wait() no lo detecta
 # (el proceso no muere), se comprueba cada _STALL_INTERVAL que la ruta 'mosaico'
@@ -103,7 +140,7 @@ async def _empty_for(page_ready, cw, ch):
     return await _ensure_empty(cw, ch)
 
 
-def _ff_args(route_names, cols, rows, cw, ch, empty_img=None) -> list:
+def _ff_args(route_names, cols, rows, cw, ch, empty_img=None, titles=None) -> list:
     """Compone con `overlay` sobre un fondo que SIEMPRE late a 15 fps.
 
     Antes se usaba `xstack`: esa cadena exige un fotograma de TODAS las
@@ -155,6 +192,11 @@ def _ff_args(route_names, cols, rows, cw, ch, empty_img=None) -> list:
         else:
             continue                    # celda vacía: el fondo ya es oscuro
         idx += 1
+        # Rótulo DESPUÉS del recorte: así el nombre y el reloj caen siempre
+        # dentro de lo visible, incluso en cámaras 4:3 que pierden los bordes.
+        if name and LABELS and os.path.exists(_FONT):
+            label = (titles or {}).get(name) or name
+            fc[-1] = fc[-1].replace(f"[c{k}]", _drawtext(k, label, ch) + f"[c{k}]")
         # eof_action=repeat: si la entrada se acaba, deja el último fotograma
         # en su celda en vez de detener la composición.
         fc.append(f"[{prev}][c{k}]overlay={x}:{y}:eof_action=repeat:shortest=0[o{k}]")
@@ -182,6 +224,7 @@ class MosaicManager:
         self._mtx = None     # cliente MediaMTX para el watchdog (se fija en set())
         self._last_bytes = None   # bytes publicados en el chequeo anterior
         self._all_names: list = []    # todas las rutas publicadas (para repaginar/rearmar)
+        self._titles: dict = {}       # {nombre_ruta: nombre visible} para el rótulo
         self._layout = 4
         self._page = 0
         self._launched_at = 0.0       # monotonic del último arranque de ffmpeg
@@ -216,13 +259,14 @@ class MosaicManager:
         cw, ch = _CELL[layout]
         empty = await _empty_for(page_ready, cw, ch)
         self._cfg = cfg
-        self._args = _ff_args(page_ready, cols, rows, cw, ch, empty)
+        self._args = _ff_args(page_ready, cols, rows, cw, ch, empty, self._titles)
         log.info("mosaico: cámaras vivas ahora %s", cfg[2])
         return True
 
-    async def set(self, mtx, route_names_all, layout, page) -> dict:
+    async def set(self, mtx, route_names_all, layout, page, titles=None) -> dict:
         """(Re)arma el mosaico. `route_names_all` = nombres de ruta publicados,
-        en orden. Devuelve whep + info de layout/paginado."""
+        en orden. `titles` = {nombre_ruta: nombre visible} para el rótulo.
+        Devuelve whep + info de layout/paginado."""
         self._mtx = mtx
         if layout not in _CELL:
             layout = 4
@@ -232,6 +276,7 @@ class MosaicManager:
         per = layout
         self._layout = layout
         self._all_names = list(route_names_all or [])
+        self._titles = dict(titles or {})
         pages = max(1, math.ceil(len(self._all_names) / per)) if self._all_names else 1
         page = max(0, min(int(page or 0), pages - 1))
         self._page = page
@@ -250,7 +295,7 @@ class MosaicManager:
                 pass                        # ya corre con esta config: no reiniciar
             else:
                 self._cfg = cfg
-                self._args = _ff_args(page_ready, cols, rows, cw, ch, empty_img)
+                self._args = _ff_args(page_ready, cols, rows, cw, ch, empty_img, self._titles)
                 await self._restart()
         return {"whep": f"/whep/{MOSAIC_NAME}", "layout": layout, "page": page,
                 "pages": pages, "cols": cols, "rows": rows, "per_page": per}

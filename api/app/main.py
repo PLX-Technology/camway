@@ -1835,7 +1835,8 @@ async def mosaic_set(request: Request, payload: dict = Body(default={})):
         page = int(payload.get("page") or 0)
     except (TypeError, ValueError):
         layout, page = 4, 0
-    info = await server_mosaic.set(mtx, [c["name"] for c in cams], layout, page)
+    info = await server_mosaic.set(mtx, [c["name"] for c in cams], layout, page,
+                                   titles={c["name"]: c["title"] for c in cams})
     per = info["per_page"]
     info["cells"] = cams[info["page"] * per: info["page"] * per + per]
     info["total"] = len(cams)

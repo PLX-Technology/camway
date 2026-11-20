@@ -47,6 +47,10 @@ services:
       CAMWAY_RECORD_ALL: ${RECORD_ALL:-}
       CAMWAY_RECORD_ALL_DAYS: ${RECORD_ALL_DAYS:-7}
       CAMWAY_MOSAIC_LOGLEVEL: ${MOSAIC_LOGLEVEL:-warning}
+      # Rótulo quemado en cada celda del mosaico: nombre + fecha/hora. Se dibuja
+      # DESPUÉS del recorte, así que se ve incluso en cámaras 4:3 recortadas a
+      # 16:9 (el OSD del fabricante caía fuera del encuadre).
+      CAMWAY_MOSAIC_LABELS: ${MOSAIC_LABELS:-1}
       # --- Avisos fuera de pantalla (foto por WhatsApp/correo). Todo opcional:
       # sin estas variables el canal queda "no configurado" y no se envía nada.
       CAMWAY_SITE_NAME: ${SITE_NAME:-Taladro}
