@@ -57,6 +57,9 @@ services:
       # Reloj de CamWay por celda: auto = solo donde el recorte a 16:9 se come
       # el reloj que quema la propia cámara; all = todas; off = ninguna.
       CAMWAY_MOSAIC_CLOCK: ${MOSAIC_CLOCK:-auto}
+      # Servidor NTP que se configura en las cámaras al pulsar "poner en hora".
+      # Es este mismo equipo, que sirve NTP a la LAN de cámaras (chrony).
+      CAMWAY_NTP_HOST: ${HOST_IP:-}
       # --- Avisos fuera de pantalla (foto por WhatsApp/correo). Todo opcional:
       # sin estas variables el canal queda "no configurado" y no se envía nada.
       CAMWAY_SITE_NAME: ${SITE_NAME:-Taladro}

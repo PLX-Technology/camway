@@ -115,8 +115,30 @@ NIC (DHCP del router).
 
 ---
 
-## 5. Túnel inverso al VPS (OTA)
+### Hora de las cámaras (NTP)
 
+El equipo sirve NTP a la LAN de cámaras con **chrony** (`allow 192.168.0.0/24`
+en `/etc/chrony/conf.d/camway-lan.conf`). Hay que apuntar cada cámara a este
+servidor: si se quedan con `time.windows.com` o `ipvs.icamra.com` (los valores
+de fábrica), desde la LAN de cámaras no se alcanzan y el reloj se queda clavado
+—con fecha de 2018— en el OSD y en las grabaciones.
+
+Desde el panel: **poner en hora** en la ficha de la cámara. El endpoint
+`POST /api/devices/{id}/osd {"set_time": true}` la apunta a `CAMWAY_NTP_HOST`
+(= `HOST_IP`) y la deja en modo NTP, sin tocar su OSD.
+
+Comprobación:
+
+```bash
+chronyc clients            # deben aparecer las IPs de las cámaras
+```
+
+> Las iCamra ignoran la zona horaria en `SetSystemDateAndTime`: conservan
+> `AST4ADT`, que aplica horario de verano de abril a octubre (UTC-3) y deja la
+> hora una hora adelantada en ese periodo. Se corrige desactivando el horario
+> de verano en su interfaz web.
+
+## 5. Túnel inverso al VPS (OTA)
 Permite entrar al equipo del cliente sin abrir puertos ni usar VPN.
 
 ```bash

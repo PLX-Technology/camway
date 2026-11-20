@@ -2343,13 +2343,21 @@ async def set_camera_osd(device_id: str, request: Request, payload: dict = Body(
         raise HTTPException(400, "no se pudo determinar la dirección de la cámara")
     name = payload.get("name")
     name = name.strip() if isinstance(name, str) else None
+    # Por defecto, "poner en hora" apunta la cámara al NTP del propio CamWay:
+    # las cámaras de fábrica vienen con time.windows.com / ipvs.icamra.com, que
+    # desde la LAN de cámaras (sin internet) no se alcanzan y el reloj se queda
+    # clavado en 2018.
+    ntp = payload.get("ntp") or os.environ.get("CAMWAY_NTP_HOST") or None
+    # Si el panel solo pide la hora, no se toca el OSD: escribir un nombre
+    # vacío borraba el rótulo que traía la cámara.
+    do_osd = any(k in payload for k in ("name", "show_name", "show_time"))
     try:
         res = await camera_osd.apply_osd(
             host, user or "", pwd or "", name=name,
             show_name=bool(payload.get("show_name", True)),
             show_time=bool(payload.get("show_time", True)),
             set_time=bool(payload.get("set_time", False)),
-            ntp=(payload.get("ntp") or None),
+            ntp=ntp, do_osd=do_osd,
         )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"OSD: {e}")

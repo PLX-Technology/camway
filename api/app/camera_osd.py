@@ -152,9 +152,37 @@ async def _soap(client, host, paths, user, pwd, body, ns):
     return None, None
 
 
-async def onvif_set_time(host: str, user: str, pwd: str) -> dict:
-    """Pone el reloj de la cámara al UTC actual (modo manual), con DST off.
-    SetSystemDateAndTime es estándar ONVIF → funciona en casi cualquier cámara."""
+async def onvif_set_ntp(host: str, user: str, pwd: str, server: str) -> dict:
+    """Apunta la cámara a un servidor NTP concreto (el de CamWay).
+
+    Muchas cámaras dejan el NTP en servidores de internet que no alcanzan desde
+    la LAN de cámaras (p. ej. `time.windows.com`), así que el reloj se queda
+    congelado en 2018 y el OSD y las grabaciones salen con fecha falsa.
+    """
+    body = ('<x:SetNTP><x:FromDHCP>false</x:FromDHCP>'
+            f'<x:NTPManual><tt:Type>IPv4</tt:Type>'
+            f'<tt:IPv4Address>{_esc(server)}</tt:IPv4Address></x:NTPManual></x:SetNTP>')
+    async with httpx.AsyncClient() as c:
+        path, r = await _soap(c, host, _DEV_PATHS, user, pwd, body, _DEV)
+    if r is None:
+        raise RuntimeError("la cámara no respondió ONVIF (SetNTP)")
+    if "Fault" in r.text:
+        raise RuntimeError("ONVIF SetNTP rechazado")
+    return {"method": "onvif", "ntp": server}
+
+
+async def onvif_set_time(host: str, user: str, pwd: str, ntp: str | None = None) -> dict:
+    """Pone el reloj de la cámara.
+
+    Con `ntp`: apunta la cámara a ese servidor y la deja en modo NTP (la zona
+    horaria NO se toca: los clones iCamra la ignoran en SetSystemDateAndTime y
+    aceptar una desconocida la deja en UTC).
+    Sin `ntp`: fija la hora MANUAL al UTC actual, con DST off.
+    """
+    if ntp:
+        res = await onvif_set_ntp(host, user, pwd, ntp)
+        res["time"] = "ntp"
+        return res
     now = datetime.now(timezone.utc)
     body = (f'<x:SetSystemDateAndTime><x:DateTimeType>Manual</x:DateTimeType>'
             f'<x:DaylightSavings>false</x:DaylightSavings>'
@@ -174,6 +202,10 @@ async def onvif_set_time(host: str, user: str, pwd: str) -> dict:
 async def onvif_set_osd_text(host: str, user: str, pwd: str, name: str) -> dict:
     """Best-effort: localiza un OSD de texto y le pone `name`. El soporte de
     SetOSD varía por modelo → validar en el HJT real. Lanza si no se puede."""
+    if not (name or "").strip():
+        # Nunca mandar un texto vacío: algunas cámaras lo aceptan y BORRAN el
+        # rótulo que tenían (pasó con la .34 al pulsar solo «poner en hora»).
+        raise RuntimeError("texto de OSD vacío: no se toca")
     async with httpx.AsyncClient() as c:
         # Prueba TODAS las rutas del servicio Media: algunas cámaras responden
         # Fault en las rutas "estándar" y sirven GetOSDs en otra (p.ej. /onvif/media).
@@ -210,26 +242,31 @@ async def onvif_set_osd_text(host: str, user: str, pwd: str, name: str) -> dict:
 
 async def apply_osd(host: str, user: str, pwd: str, name: str | None,
                     show_name: bool, show_time: bool, set_time: bool,
-                    ntp: str | None = None) -> dict:
+                    ntp: str | None = None, do_osd: bool = True) -> dict:
     """Aplica OSD (nombre + overlays) y, opcional, pone en hora. Prueba ISAPI
-    (Hikvision/HiLook) y cae a ONVIF (HJT/genéricas). Devuelve qué funcionó."""
+    (Hikvision/HiLook) y cae a ONVIF (HJT/genéricas). Devuelve qué funcionó.
+
+    `do_osd=False` deja el OSD de la cámara intacto y solo toca la hora: es lo
+    que hay que usar cuando el panel pide únicamente «poner en hora».
+    """
     res: dict = {"host": host, "errors": []}
     # --- OSD (nombre + overlays) ---
-    try:
-        res["osd"] = await isapi_osd(host, user, pwd, name, show_name, show_time)
-    except Exception as e_isapi:  # noqa: BLE001
+    if do_osd:
         try:
-            res["osd"] = await onvif_set_osd_text(host, user, pwd, name or "")
-            res["osd"]["note"] = "ONVIF: overlays de fecha/hora no se tocan por esta vía"
-        except Exception as e_onvif:  # noqa: BLE001
-            res["errors"].append(f"OSD: ISAPI='{e_isapi}' ONVIF='{e_onvif}'")
+            res["osd"] = await isapi_osd(host, user, pwd, name, show_name, show_time)
+        except Exception as e_isapi:  # noqa: BLE001
+            try:
+                res["osd"] = await onvif_set_osd_text(host, user, pwd, name or "")
+                res["osd"]["note"] = "ONVIF: overlays de fecha/hora no se tocan por esta vía"
+            except Exception as e_onvif:  # noqa: BLE001
+                res["errors"].append(f"OSD: ISAPI='{e_isapi}' ONVIF='{e_onvif}'")
     # --- hora ---
     if set_time:
         try:
             res["time"] = await isapi_set_time(host, user, pwd, ntp)
         except Exception as e_isapi:  # noqa: BLE001
             try:
-                res["time"] = await onvif_set_time(host, user, pwd)
+                res["time"] = await onvif_set_time(host, user, pwd, ntp)
             except Exception as e_onvif:  # noqa: BLE001
                 res["errors"].append(f"hora: ISAPI='{e_isapi}' ONVIF='{e_onvif}'")
     res["ok"] = "osd" in res or "time" in res
