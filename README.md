@@ -15,6 +15,12 @@ docker compose up -d --build
 
 Luego abre <http://localhost:8120>.
 
+Para un **equipo nuevo** (réplica del servidor del taladro), usa el kit de
+instalación: [`deploy/replica/`](deploy/replica/README.md). Incluye el script de
+alta, el endurecimiento del sistema (reinicio automático si el kernel se cuelga,
+journal a disco cada 10 s), la red sin gateway en la LAN de cámaras, el túnel
+inverso al VPS y la verificación.
+
 `HOST_IP` tiene que ser la IP real del equipo en la LAN, no `127.0.0.1`: la usa
 el navegador para hablar con MediaMTX y la usa MediaMTX para anunciar su
 candidato ICE. Con `127.0.0.1` el mosaico no conecta desde otra máquina.

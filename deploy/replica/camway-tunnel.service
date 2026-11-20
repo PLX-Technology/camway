@@ -1,0 +1,22 @@
+[Unit]
+Description=CamWay reverse SSH tunnel to VPS (rtdriller.com)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=camway
+# OJO: el puerto remoto (2222) es único por equipo. Si hay varios servidores
+# CamWay, cada uno necesita el suyo (2222, 2223, 2224...). Con
+# ExitOnForwardFailure=yes el servicio FALLA si el puerto está ocupado, en vez
+# de quedarse "arriba" sin túnel (le pasó al .30: 224 reinicios).
+ExecStart=/usr/bin/ssh -N -i /home/camway/.ssh/vps_tunnel \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o StrictHostKeyChecking=accept-new \
+    -R 2222:localhost:22 root@rtdriller.com
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
