@@ -28,17 +28,19 @@ BITRATE = os.environ.get("CAMWAY_MOSAIC_BITRATE", "3500k")
 # Tamaño de celda por layout (todo 16:9; total <= 1920x1080).
 _CELL = {1: (1280, 720), 4: (640, 360), 9: (480, 270), 16: (480, 270)}
 
-# Rotulación quemada en el mosaico: nombre de la cámara arriba-izquierda y
-# fecha/hora abajo-derecha, dibujadas por CamWay con drawtext.
+# Rotulación quemada en el mosaico: barra inferior con la fecha/hora, dibujada
+# por CamWay con drawtext. El nombre de la cámara arriba es opcional y viene
+# apagado (CAMWAY_MOSAIC_TITLE=1 para volver a ponerlo).
 #
 # Por qué aquí y no en la cámara: las celdas recortan la imagen para llenar el
 # 16:9, y una cámara 4:3 (p.ej. la .32, 704x576) pierde el 15,6 % de arriba y
 # el 15,6 % de abajo, que es justo donde el fabricante pone su OSD. Además el
 # OSD de la cámara no siempre se puede activar (las iCamra aceptan el SetOSD y
 # lo ignoran). Dibujarlo después del recorte garantiza que se vea siempre.
-# Desactivar con CAMWAY_MOSAIC_LABELS=0.
+# Desactivar del todo con CAMWAY_MOSAIC_LABELS=0.
 _FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 LABELS = os.environ.get("CAMWAY_MOSAIC_LABELS", "1") not in ("0", "false", "no", "")
+TITLE = os.environ.get("CAMWAY_MOSAIC_TITLE", "0") not in ("0", "false", "no", "")
 
 
 def _label_file(k: int, text: str) -> str:
@@ -53,17 +55,18 @@ def _label_file(k: int, text: str) -> str:
 
 
 def _drawtext(k: int, label: str, ch: int) -> str:
-    """Filtros de rótulo para una celda (nombre + reloj)."""
+    """Filtros de rótulo de una celda: barra inferior con fecha/hora y, si
+    CAMWAY_MOSAIC_TITLE=1, también el nombre arriba a la izquierda."""
     fs = max(12, ch // 20)
-    box = f"fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=5"
+    box = "fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=5"
     # El reloj usa expansion=strftime: el formato se evalúa en cada fotograma;
     # los ':' del formato van escapados para que el parser no los corte.
-    return (
-        f",drawtext=fontfile={_FONT}:textfile={_label_file(k, label)}"
-        f":x=8:y=6:fontsize={fs}:{box}"
-        f",drawtext=fontfile={_FONT}:text='%Y-%m-%d %H\\:%M\\:%S'"
-        f":expansion=strftime:x=w-tw-10:y=h-th-10:fontsize={fs}:{box}"
-    )
+    reloj = (f",drawtext=fontfile={_FONT}:text='%Y-%m-%d %H\\:%M\\:%S'"
+             f":expansion=strftime:x=w-tw-10:y=h-th-10:fontsize={fs}:{box}")
+    if not TITLE:
+        return reloj
+    return (f",drawtext=fontfile={_FONT}:textfile={_label_file(k, label)}"
+            f":x=8:y=6:fontsize={fs}:{box}") + reloj
 
 # Watchdog del mosaico: el ffmpeg puede quedar VIVO pero ATASCADO (sin publicar)
 # cuando una cámara se congela y se recupera. Como proc.wait() no lo detecta

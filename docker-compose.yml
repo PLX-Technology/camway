@@ -51,6 +51,9 @@ services:
       # DESPUÉS del recorte, así que se ve incluso en cámaras 4:3 recortadas a
       # 16:9 (el OSD del fabricante caía fuera del encuadre).
       CAMWAY_MOSAIC_LABELS: ${MOSAIC_LABELS:-1}
+      # El nombre de la cámara arriba a la izquierda. Apagado por defecto: solo
+      # se pinta la barra inferior con la fecha/hora.
+      CAMWAY_MOSAIC_TITLE: ${MOSAIC_TITLE:-0}
       # --- Avisos fuera de pantalla (foto por WhatsApp/correo). Todo opcional:
       # sin estas variables el canal queda "no configurado" y no se envía nada.
       CAMWAY_SITE_NAME: ${SITE_NAME:-Taladro}
