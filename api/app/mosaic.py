@@ -55,18 +55,27 @@ def _label_file(k: int, text: str) -> str:
 
 
 def _drawtext(k: int, label: str, ch: int) -> str:
-    """Filtros de rótulo de una celda: barra inferior con fecha/hora y, si
-    CAMWAY_MOSAIC_TITLE=1, también el nombre arriba a la izquierda."""
+    """Barra inferior de la celda: banda negra de TODO el ancho con la
+    fecha/hora a la derecha (y el nombre a la izquierda si CAMWAY_MOSAIC_TITLE).
+
+    La banda es lo que hace que el rótulo del visor (que se dibuja sobre el
+    video, abajo a la izquierda) quede sobre el mismo negro y no se vean dos
+    recuadros distintos pegados.
+    """
     fs = max(12, ch // 20)
-    box = "fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=5"
-    # El reloj usa expansion=strftime: el formato se evalúa en cada fotograma;
-    # los ':' del formato van escapados para que el parser no los corte.
+    bh = fs + 14                      # alto de la banda
+    banda = f",drawbox=x=0:y=ih-{bh}:w=iw:h={bh}:color=black@0.45:t=fill"
+    # Reloj: expansion=strftime evalúa el formato en cada fotograma; los ':' del
+    # formato van escapados para que el parser del filtro no los corte.
     reloj = (f",drawtext=fontfile={_FONT}:text='%Y-%m-%d %H\\:%M\\:%S'"
-             f":expansion=strftime:x=w-tw-10:y=h-th-10:fontsize={fs}:{box}")
+             f":expansion=strftime:x=w-tw-10:y=h-{bh}+({bh}-th)/2"
+             f":fontsize={fs}:fontcolor=white")
     if not TITLE:
-        return reloj
-    return (f",drawtext=fontfile={_FONT}:textfile={_label_file(k, label)}"
-            f":x=8:y=6:fontsize={fs}:{box}") + reloj
+        return banda + reloj
+    return (banda
+            + f",drawtext=fontfile={_FONT}:textfile={_label_file(k, label)}"
+              f":x=10:y=h-{bh}+({bh}-th)/2:fontsize={fs}:fontcolor=white"
+            + reloj)
 
 # Watchdog del mosaico: el ffmpeg puede quedar VIVO pero ATASCADO (sin publicar)
 # cuando una cámara se congela y se recupera. Como proc.wait() no lo detecta
