@@ -133,10 +133,22 @@ Comprobación:
 chronyc clients            # deben aparecer las IPs de las cámaras
 ```
 
-> Las iCamra ignoran la zona horaria en `SetSystemDateAndTime`: conservan
-> `AST4ADT`, que aplica horario de verano de abril a octubre (UTC-3) y deja la
-> hora una hora adelantada en ese periodo. Se corrige desactivando el horario
-> de verano en su interfaz web.
+> **Trampa del horario de verano (iCamra).** Estas cámaras pueden quedarse con
+> el flag de horario de verano activo: el OSD muestra **una hora más** (UTC-3)
+> aunque `GetSystemDateAndTime` responda `DaylightSavings=false` y una hora
+> local correcta. Medido en el `.32` y el `.33`: OSD 17:05 con hora real 16:05.
+>
+> No basta con reenviar `SetSystemDateAndTime`: hay que forzar un cambio de
+> zona y volver a la original. Secuencia que lo corrige (probada, verificada
+> leyendo el OSD por OCR):
+>
+> 1. `SetSystemDateAndTime` con `TimeZone` = `America/Caracas` (la cámara la
+>    interpreta como UTC +0).
+> 2. `SetSystemDateAndTime` con `TimeZone` = `AST4ADT,M4.1.0/00:01:00,M10.5.0/00:01:00`
+>    y `DaylightSavings=false` → vuelve a UTC-4 pero ya sin el flag.
+>
+> Conviene comprobarlo leyendo el OSD (no la API): la API puede decir una cosa
+> y el vídeo otra.
 
 ## 5. Túnel inverso al VPS (OTA)
 Permite entrar al equipo del cliente sin abrir puertos ni usar VPN.
