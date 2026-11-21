@@ -199,7 +199,14 @@ def _ff_args(route_names, cols, rows, cw, ch, empty_img=None, titles=None, sizes
         if name:
             # analyzeduration/probesize bajos: ffmpeg por defecto analiza hasta
             # 5s cada entrada antes de arrancar → el mosaico tardaba ~10s en salir.
-            args += ["-rtsp_transport", "tcp", "-fflags", "nobuffer",
+            args += ["-rtsp_transport", "tcp",
+                     # Baja latencia: no acumular en el demuxer ni en la capa de
+                     # E/S. `nobuffer` ya estaba; `low_delay` desactiva el
+                     # reordenado y `avioflags direct` evita el buffer de AVIO.
+                     "-fflags", "nobuffer",
+                     "-flags", "low_delay",
+                     "-avioflags", "direct",
+                     "-max_delay", "0",
                      "-analyzeduration", "1000000", "-probesize", "1000000",
                      # 16 hilos por decodificador (uno por CPU) hinchan el
                      # proceso a ~500 MB: con 2 basta de sobra para 640x360.
@@ -243,7 +250,9 @@ def _ff_args(route_names, cols, rows, cw, ch, empty_img=None, titles=None, sizes
              "-threads", "4",
              "-profile:v", "baseline", "-pix_fmt", "yuv420p",
              "-b:v", BITRATE, "-maxrate", BITRATE, "-bufsize", BITRATE,
-             "-g", "15", "-an",   # keyframe cada ~1s: el cliente arranca más rápido
+             "-g", "10", "-an",   # keyframe cada ~0,66 s: el cliente engancha antes
+             # Sin retención en el muxer: cada paquete sale en cuanto se codifica.
+             "-flush_packets", "1",
              "-f", "rtsp", "-rtsp_transport", "tcp", f"{MTX_RTSP}/{MOSAIC_NAME}"]
     return args
 
