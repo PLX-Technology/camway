@@ -60,6 +60,9 @@ services:
       # Servidor NTP que se configura en las cámaras al pulsar "poner en hora".
       # Es este mismo equipo, que sirve NTP a la LAN de cámaras (chrony).
       CAMWAY_NTP_HOST: ${HOST_IP:-}
+      # Cada cuántos segundos se revisa la hora de las cámaras y se repone si
+      # se desvía (0 lo apaga).
+      CAMWAY_NTP_WATCH: ${NTP_WATCH:-600}
       # --- Avisos fuera de pantalla (foto por WhatsApp/correo). Todo opcional:
       # sin estas variables el canal queda "no configurado" y no se envía nada.
       CAMWAY_SITE_NAME: ${SITE_NAME:-Taladro}

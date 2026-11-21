@@ -27,6 +27,7 @@ from .bluiris import BlueIris
 from . import onvif_ptz
 from . import onvif_encoder
 from . import camera_osd
+from . import ntpwatch
 from . import notifier as notifmod
 from . import sysmon
 from . import talkback
@@ -356,10 +357,12 @@ async def lifespan(app: FastAPI):
     recycler_task = asyncio.create_task(_disk_recycler())
     backup_task = asyncio.create_task(_db_backup_loop())
     notifier_task = asyncio.create_task(notifier.run())
+    ntp_task = asyncio.create_task(ntpwatch.agent(store))
 
     yield
 
     notifier_task.cancel()
+    ntp_task.cancel()
     reconcile_task.cancel()
     cleanup_task.cancel()
     recycler_task.cancel()

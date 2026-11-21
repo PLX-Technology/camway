@@ -271,3 +271,56 @@ async def apply_osd(host: str, user: str, pwd: str, name: str | None,
                 res["errors"].append(f"hora: ISAPI='{e_isapi}' ONVIF='{e_onvif}'")
     res["ok"] = "osd" in res or "time" in res
     return res
+
+
+# --------------------------------------------------------------------------
+# Vigilancia de la hora (para el watchdog periódico)
+# --------------------------------------------------------------------------
+
+_TZ_RE = re.compile(r"<tt:TZ>([^<]*)</tt:TZ>")
+_LOCAL_RE = re.compile(
+    r"<tt:LocalDateTime><tt:Time><tt:Hour>(\d+)</tt:Hour><tt:Minute>(\d+)</tt:Minute>"
+    r"<tt:Second>(\d+)</tt:Second></tt:Time><tt:Date><tt:Year>(\d+)</tt:Year>"
+    r"<tt:Month>(\d+)</tt:Month><tt:Day>(\d+)</tt:Day>")
+
+
+async def onvif_read_time(host: str, user: str, pwd: str):
+    """(desfase_en_segundos, tz_actual) o (None, None) si no se puede leer.
+
+    El desfase es la hora LOCAL de la cámara menos la hora local del servidor.
+    """
+    async with httpx.AsyncClient() as c:
+        path, r = await _soap(c, host, _DEV_PATHS, user, pwd,
+                              "<x:GetSystemDateAndTime/>", _DEV)
+    if r is None or "Fault" in r.text:
+        return None, None
+    m = _LOCAL_RE.search(r.text)
+    if not m:
+        return None, None
+    cam = datetime(int(m.group(4)), int(m.group(5)), int(m.group(6)),
+                   int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    off = (cam - datetime.now()).total_seconds()
+    tz = _TZ_RE.search(r.text)
+    return off, (tz.group(1) if tz else None)
+
+
+async def onvif_fix_clock(host: str, user: str, pwd: str, ntp: str | None) -> dict:
+    """Apunta la cámara al NTP de CamWay y limpia el horario de verano pegado.
+
+    El truco que funciona en las iCamra: forzar un cambio de zona (America/
+    Caracas, que toman como UTC+0) y volver a la zona original con
+    DaylightSavings=false. Sin ese viaje de ida y vuelta el flag de DST sigue
+    activo y el OSD queda una hora adelantado, aunque la API diga que no.
+    """
+    if ntp:
+        await onvif_set_ntp(host, user, pwd, ntp)
+    _, tz = await onvif_read_time(host, user, pwd)
+    tz = tz or "AST4ADT,M4.1.0/00:01:00,M10.5.0/00:01:00"
+    async with httpx.AsyncClient() as c:
+        for zona in ("America/Caracas", tz):
+            body = ('<x:SetSystemDateAndTime><x:DateTimeType>NTP</x:DateTimeType>'
+                    '<x:DaylightSavings>false</x:DaylightSavings>'
+                    f'<x:TimeZone><tt:TZ>{_esc(zona)}</tt:TZ></x:TimeZone>'
+                    '</x:SetSystemDateAndTime>')
+            await _soap(c, host, _DEV_PATHS, user, pwd, body, _DEV)
+    return {"ntp": ntp, "tz": tz}
