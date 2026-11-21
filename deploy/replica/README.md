@@ -150,6 +150,47 @@ chronyc clients            # deben aparecer las IPs de las cámaras
 > Conviene comprobarlo leyendo el OSD (no la API): la API puede decir una cosa
 > y el vídeo otra.
 
+### Grabaciones de segundos en vez de 10 minutos
+
+Síntoma: cientos de MP4 al día por cámara, de entre 0,7 y 15 segundos, cuando
+`recordSegmentDuration` está en **10m**.
+
+Causa: MediaMTX **cierra el archivo cada vez que se cae la conexión con la
+cámara** y abre otro al reconectar; no es que el segmento esté mal configurado.
+En el `.30` el log mostraba, cada ~25 s:
+
+```
+[RTSP source] dial tcp 192.168.0.32:554: connect: no route to host
+```
+
+`no route to host` hacia un equipo de la misma LAN = **fallo de resolución
+ARP**, no de la cámara. Con dos tarjetas metidas en el mismo segmento el kernel
+mezcla vecinos (ARP flux). El 21/11/2026 la `.32` acumuló 1.074 archivos en un
+día.
+
+Arreglo (incluido aquí):
+
+```bash
+sudo install -m 0755 red/camway-arp-fija.sh /usr/local/sbin/
+sudo install -m 0644 red/camway-arp-fija.service red/camway-arp-fija.timer /etc/systemd/system/
+sudo install -m 0644 red/99-camway-red.conf /etc/sysctl.d/
+sudo sysctl --system
+sudo systemctl daemon-reload && sudo systemctl enable --now camway-arp-fija.timer
+```
+
+Deja la MAC de cada cámara como entrada **permanent** (sin resolución que
+perder), endurece el ARP del kernel y **reaprende la MAC cada 10 minutos**, así
+que si se cambia una cámara se corrige sola. Ajustar la interfaz en el
+`.service` si en el equipo nuevo se llama distinto.
+
+Verificación: los segmentos nuevos deben durar 600 s.
+
+```bash
+ls -t /opt/camway/rec/192-168-0-32_554__0 | head -3
+docker exec camway-mediamtx ffprobe -v error -show_entries format=duration \
+  -of csv=p=0 /rec/192-168-0-32_554__0/<archivo>.mp4
+```
+
 ## 5. Túnel inverso al VPS (OTA)
 Permite entrar al equipo del cliente sin abrir puertos ni usar VPN.
 

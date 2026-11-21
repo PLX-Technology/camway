@@ -1,0 +1,11 @@
+[Unit]
+Description=CamWay: fija la MAC de las camaras en la tabla ARP
+Documentation=file:/opt/camway/deploy/replica/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# La interfaz de la LAN de camaras; ajustar si en el equipo nuevo se llama de
+# otra forma (ip -br link).
+ExecStart=/usr/local/sbin/camway-arp-fija.sh enp2s0
