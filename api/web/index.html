@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="512x512" href="/static/favicon-512.png">
 <link rel="apple-touch-icon" href="/static/favicon-512.png">
 <link rel="stylesheet" href="/static/style.css?v=53">
-<link rel="stylesheet" href="/static/wall.css?v=2">
+<link rel="stylesheet" href="/static/wall.css?v=3">
 <link rel="stylesheet" href="/static/gestion.css?v=3">
 </head>
 <body>
@@ -742,6 +742,11 @@
     <span class="dvr-title" id="dvrTitle"></span>
     <time class="dvr-clock" id="dvrClock"></time>
     <div class="dvr-tools">
+      <span class="dvr-lbl" id="dvrModeLbl">Modo</span>
+      <div class="cw-seg" id="dvrMode" role="group" aria-labelledby="dvrModeLbl">
+        <button type="button" data-mode="direct" aria-pressed="true" title="Cada cámara por separado, sin recomprimir: mismo retardo que a pantalla completa">Tiempo real</button>
+        <button type="button" data-mode="mosaic" aria-pressed="false" title="El servidor compone una sola imagen: menos CPU en el visor, pero ~1 s más de retardo">Mosaico</button>
+      </div>
       <span class="dvr-lbl" id="dvrSegLbl">Rejilla</span>
       <div class="cw-seg" id="dvrSeg" role="group" aria-labelledby="dvrSegLbl">
         <button type="button" data-layout="auto" aria-pressed="true" title="Rejilla según el número de cámaras">Auto</button>
@@ -777,7 +782,7 @@
 <script src="/static/icons.js?v=3"></script>
 <script src="/static/ui.js?v=7"></script>
 <script src="/static/whep.js?v=2"></script>
-<script src="/static/dvr.js?v=10"></script>
+<script src="/static/dvr.js?v=11"></script>
 <script src="/static/app.js?v=100"></script>
 </body>
 </html>

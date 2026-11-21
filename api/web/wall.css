@@ -240,6 +240,15 @@
   color: #8592A3; font-size: 13px; pointer-events: none;
 }
 
+/* --- modo DIRECTO: cada celda con su propio <video> --- */
+#dvrView .dvr-stage.direct { background: #05070A; }
+#dvrView .dvr-pos > video { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+/* el spinner es por celda: se apaga cuando esa cámara arranca */
+#dvrView .dvr-stage.direct .dvr-load { display: flex; }
+#dvrView .dvr-stage.direct .dvr-pos:not(.loading) .dvr-load { display: none; }
+#dvrView .dvr-stage.direct .dvr-state { font-size: 12px; padding: 6px; }
+#dvrView .dvr-stage.direct .dvr-pos .dvr-name { background: rgba(0, 0, 0, .45); }
+
 /* una cámara ampliada (flujo directo) */
 #dvrView .dvr-max { position: absolute; left: 0; right: 0; top: 52px; bottom: 0; background: #000; display: none; }
 #dvrView.dvrview.maxed .dvr-grid { display: none; }
