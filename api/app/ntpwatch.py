@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 
 from . import camera_osd
 
@@ -22,6 +23,11 @@ log = logging.getLogger("camway.ntp")
 
 INTERVAL = max(120, int(os.environ.get("CAMWAY_NTP_WATCH", "600") or 600))
 MAX_OFF = int(os.environ.get("CAMWAY_NTP_MAX_OFF", "60") or 60)
+# Además del chequeo por desfase, se reaplica la corrección cada N horas: el
+# fallo del DST pegado NO se ve por ONVIF (la cámara reporta hora local
+# correcta mientras el OSD va una hora adelantado), así que hay que forzarlo
+# cada cierto tiempo para que no se quede ahí para siempre.
+REAPPLY_S = max(3600, int(float(os.environ.get("CAMWAY_NTP_REAPPLY_H", "12") or 12) * 3600))
 
 
 def _camaras(store):
@@ -50,6 +56,7 @@ async def agent(store) -> None:
     log.info("vigilante de hora activo: revisa cada %d s (tope %d s, NTP %s)",
              INTERVAL, MAX_OFF, ntp or "sin servidor")
     await asyncio.sleep(90)          # deja arrancar MediaMTX y las cámaras
+    ultimo = {}                      # host -> monotonic de la última corrección
     while True:
         try:
             for host, user, pwd in _camaras(store):
@@ -57,12 +64,17 @@ async def agent(store) -> None:
                     off, _tz = await camera_osd.onvif_read_time(host, user, pwd)
                 except Exception:      # noqa: BLE001
                     continue
-                if off is None or abs(off) <= MAX_OFF:
+                vencido = (time.monotonic() - ultimo.get(host, 0.0)) >= REAPPLY_S
+                desviado = off is not None and abs(off) > MAX_OFF
+                if not vencido and not desviado:
                     continue
-                log.warning("cámara %s con %+.0f s de desfase → reaplicando NTP", host, off)
+                log.info("cámara %s: reaplicando hora (desfase %s s%s)",
+                         host, f"{off:+.0f}" if off is not None else "?",
+                         ", toca revisión periódica" if vencido and not desviado else "")
                 try:
                     await camera_osd.onvif_fix_clock(host, user, pwd, ntp)
                     off2, _ = await camera_osd.onvif_read_time(host, user, pwd)
+                    ultimo[host] = time.monotonic()
                     log.info("cámara %s corregida (ahora %+.0f s)", host, off2 or 0)
                 except Exception as e:  # noqa: BLE001
                     log.warning("no se pudo corregir la hora de %s: %s", host, e)
